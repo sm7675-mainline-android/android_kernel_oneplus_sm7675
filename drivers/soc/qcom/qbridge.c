@@ -20,18 +20,18 @@ static long qbridge_compat_ioctl(struct qbridge_compat_ioctl __user *argp)
 		return -EFAULT;
 
 	f = fdget(args.fd);
-	if (!f.file)
+	if (!fd_file(f))
 		return -EBADF;
 
 	set_thread_flag(TIF_32BIT);
 
-	retval = security_file_ioctl(f.file, args.cmd, args.arg);
+	retval = security_file_ioctl(fd_file(f), args.cmd, args.arg);
 	if (retval)
 		goto out;
 
 	retval = -ENOIOCTLCMD;
-	if (f.file->f_op->compat_ioctl)
-		retval = f.file->f_op->compat_ioctl(f.file, args.cmd, args.arg);
+	if (fd_file(f)->f_op->compat_ioctl)
+		retval = fd_file(f)->f_op->compat_ioctl(fd_file(f), args.cmd, args.arg);
 
 out:
 	clear_thread_flag(TIF_32BIT);
