@@ -173,7 +173,7 @@ int crypto_qti_virt_program_key(const struct blk_crypto_key *key,
 	req.cmd = FBE_SET_KEY_V2;
 	req.virt_slot = slot;
 	req.key_size = key->size;
-	memcpy(&(req.key[0]),  key->raw, key->size);
+	memcpy(&(req.key[0]),  key->bytes, key->size);
 	ret = send_fbe_req(&req, &response);
 
 	if (ret || response.status) {

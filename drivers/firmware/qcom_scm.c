@@ -75,7 +75,7 @@ struct qcom_scm {
 	u64 dload_mode_addr;
 };
 
-DEFINE_SEMAPHORE(qcom_scm_sem_lock);
+DEFINE_SEMAPHORE(qcom_scm_sem_lock, 1);
 
 #define QCOM_SCM_FLAG_COLDBOOT_CPU0	0x00
 #define QCOM_SCM_FLAG_COLDBOOT_CPU1	0x01
@@ -2121,6 +2121,192 @@ int qcom_scm_ice_set_key(u32 index, const u8 *key, u32 key_size,
 	return ret;
 }
 EXPORT_SYMBOL(qcom_scm_ice_set_key);
+
+/*
+ * Provide the wrapped-key SCM interface required by the 6.18 ICE driver.
+ * Use coherent DMA buffers because this vendor driver has no qcom_tzmem.
+ */
+bool qcom_scm_has_wrapped_key_support(void)
+{
+	if (!__scm)
+		return false;
+
+	return __qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_ES,
+					    QCOM_SCM_ES_DERIVE_SW_SECRET) &&
+	       __qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_ES,
+					    QCOM_SCM_ES_GENERATE_ICE_KEY) &&
+	       __qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_ES,
+					    QCOM_SCM_ES_PREPARE_ICE_KEY) &&
+	       __qcom_scm_is_call_available(__scm->dev, QCOM_SCM_SVC_ES,
+					    QCOM_SCM_ES_IMPORT_ICE_KEY);
+}
+EXPORT_SYMBOL_GPL(qcom_scm_has_wrapped_key_support);
+
+int qcom_scm_derive_sw_secret(const u8 *eph_key, size_t eph_key_size,
+			      u8 *sw_secret, size_t sw_secret_size)
+{
+	struct qcom_scm_desc desc = {
+		.svc = QCOM_SCM_SVC_ES,
+		.cmd = QCOM_SCM_ES_DERIVE_SW_SECRET,
+		.arginfo = QCOM_SCM_ARGS(4, QCOM_SCM_RW, QCOM_SCM_VAL,
+					 QCOM_SCM_RW, QCOM_SCM_VAL),
+		.owner = ARM_SMCCC_OWNER_SIP,
+	};
+	dma_addr_t eph_phys = 0, secret_phys = 0;
+	void *eph_buf, *secret_buf;
+	int ret;
+
+	eph_buf = dma_alloc_coherent(__scm->dev, eph_key_size, &eph_phys,
+				     GFP_KERNEL);
+	if (!eph_buf)
+		return -ENOMEM;
+
+	secret_buf = dma_alloc_coherent(__scm->dev, sw_secret_size, &secret_phys,
+					GFP_KERNEL);
+	if (!secret_buf) {
+		dma_free_coherent(__scm->dev, eph_key_size, eph_buf, eph_phys);
+		return -ENOMEM;
+	}
+
+	memcpy(eph_buf, eph_key, eph_key_size);
+	desc.args[0] = eph_phys;
+	desc.args[1] = eph_key_size;
+	desc.args[2] = secret_phys;
+	desc.args[3] = sw_secret_size;
+
+	ret = qcom_scm_call(__scm->dev, &desc, NULL);
+	if (!ret)
+		memcpy(sw_secret, secret_buf, sw_secret_size);
+
+	memzero_explicit(eph_buf, eph_key_size);
+	memzero_explicit(secret_buf, sw_secret_size);
+	dma_free_coherent(__scm->dev, eph_key_size, eph_buf, eph_phys);
+	dma_free_coherent(__scm->dev, sw_secret_size, secret_buf, secret_phys);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(qcom_scm_derive_sw_secret);
+
+int qcom_scm_generate_ice_key(u8 *lt_key, size_t lt_key_size)
+{
+	struct qcom_scm_desc desc = {
+		.svc = QCOM_SCM_SVC_ES,
+		.cmd = QCOM_SCM_ES_GENERATE_ICE_KEY,
+		.arginfo = QCOM_SCM_ARGS(2, QCOM_SCM_RW, QCOM_SCM_VAL),
+		.owner = ARM_SMCCC_OWNER_SIP,
+	};
+	dma_addr_t lt_phys = 0;
+	void *lt_buf;
+	int ret;
+
+	lt_buf = dma_alloc_coherent(__scm->dev, lt_key_size, &lt_phys,
+				    GFP_KERNEL);
+	if (!lt_buf)
+		return -ENOMEM;
+
+	desc.args[0] = lt_phys;
+	desc.args[1] = lt_key_size;
+
+	ret = qcom_scm_call(__scm->dev, &desc, NULL);
+	if (!ret)
+		memcpy(lt_key, lt_buf, lt_key_size);
+
+	memzero_explicit(lt_buf, lt_key_size);
+	dma_free_coherent(__scm->dev, lt_key_size, lt_buf, lt_phys);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(qcom_scm_generate_ice_key);
+
+int qcom_scm_prepare_ice_key(const u8 *lt_key, size_t lt_key_size,
+			     u8 *eph_key, size_t eph_key_size)
+{
+	struct qcom_scm_desc desc = {
+		.svc = QCOM_SCM_SVC_ES,
+		.cmd = QCOM_SCM_ES_PREPARE_ICE_KEY,
+		.arginfo = QCOM_SCM_ARGS(4, QCOM_SCM_RO, QCOM_SCM_VAL,
+					 QCOM_SCM_RW, QCOM_SCM_VAL),
+		.owner = ARM_SMCCC_OWNER_SIP,
+	};
+	dma_addr_t lt_phys = 0, eph_phys = 0;
+	void *lt_buf, *eph_buf;
+	int ret;
+
+	lt_buf = dma_alloc_coherent(__scm->dev, lt_key_size, &lt_phys,
+				    GFP_KERNEL);
+	if (!lt_buf)
+		return -ENOMEM;
+
+	eph_buf = dma_alloc_coherent(__scm->dev, eph_key_size, &eph_phys,
+				     GFP_KERNEL);
+	if (!eph_buf) {
+		dma_free_coherent(__scm->dev, lt_key_size, lt_buf, lt_phys);
+		return -ENOMEM;
+	}
+
+	memcpy(lt_buf, lt_key, lt_key_size);
+	desc.args[0] = lt_phys;
+	desc.args[1] = lt_key_size;
+	desc.args[2] = eph_phys;
+	desc.args[3] = eph_key_size;
+
+	ret = qcom_scm_call(__scm->dev, &desc, NULL);
+	if (!ret)
+		memcpy(eph_key, eph_buf, eph_key_size);
+
+	memzero_explicit(lt_buf, lt_key_size);
+	memzero_explicit(eph_buf, eph_key_size);
+	dma_free_coherent(__scm->dev, lt_key_size, lt_buf, lt_phys);
+	dma_free_coherent(__scm->dev, eph_key_size, eph_buf, eph_phys);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(qcom_scm_prepare_ice_key);
+
+int qcom_scm_import_ice_key(const u8 *raw_key, size_t raw_key_size,
+			    u8 *lt_key, size_t lt_key_size)
+{
+	struct qcom_scm_desc desc = {
+		.svc = QCOM_SCM_SVC_ES,
+		.cmd = QCOM_SCM_ES_IMPORT_ICE_KEY,
+		.arginfo = QCOM_SCM_ARGS(4, QCOM_SCM_RO, QCOM_SCM_VAL,
+					 QCOM_SCM_RW, QCOM_SCM_VAL),
+		.owner = ARM_SMCCC_OWNER_SIP,
+	};
+	dma_addr_t raw_phys = 0, lt_phys = 0;
+	void *raw_buf, *lt_buf;
+	int ret;
+
+	raw_buf = dma_alloc_coherent(__scm->dev, raw_key_size, &raw_phys,
+				     GFP_KERNEL);
+	if (!raw_buf)
+		return -ENOMEM;
+
+	lt_buf = dma_alloc_coherent(__scm->dev, lt_key_size, &lt_phys,
+				    GFP_KERNEL);
+	if (!lt_buf) {
+		dma_free_coherent(__scm->dev, raw_key_size, raw_buf, raw_phys);
+		return -ENOMEM;
+	}
+
+	memcpy(raw_buf, raw_key, raw_key_size);
+	desc.args[0] = raw_phys;
+	desc.args[1] = raw_key_size;
+	desc.args[2] = lt_phys;
+	desc.args[3] = lt_key_size;
+
+	ret = qcom_scm_call(__scm->dev, &desc, NULL);
+	if (!ret)
+		memcpy(lt_key, lt_buf, lt_key_size);
+
+	memzero_explicit(raw_buf, raw_key_size);
+	memzero_explicit(lt_buf, lt_key_size);
+	dma_free_coherent(__scm->dev, raw_key_size, raw_buf, raw_phys);
+	dma_free_coherent(__scm->dev, lt_key_size, lt_buf, lt_phys);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(qcom_scm_import_ice_key);
 
 int qcom_scm_config_set_ice_key(uint32_t index, phys_addr_t paddr, size_t size,
 				uint32_t cipher, unsigned int data_unit,

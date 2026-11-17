@@ -255,6 +255,16 @@ extern int qcom_scm_config_set_ice_key(uint32_t index, phys_addr_t paddr,
 extern int qcom_scm_clear_ice_key(uint32_t index, unsigned int ce);
 extern int qcom_scm_derive_raw_secret(phys_addr_t paddr_key, size_t size_key,
 		phys_addr_t paddr_secret, size_t size_secret);
+
+/* Wrapped-key SCM interface used by the 6.18 ICE driver. */
+extern bool qcom_scm_has_wrapped_key_support(void);
+extern int qcom_scm_derive_sw_secret(const u8 *eph_key, size_t eph_key_size,
+				     u8 *sw_secret, size_t sw_secret_size);
+extern int qcom_scm_generate_ice_key(u8 *lt_key, size_t lt_key_size);
+extern int qcom_scm_prepare_ice_key(const u8 *lt_key, size_t lt_key_size,
+				    u8 *eph_key, size_t eph_key_size);
+extern int qcom_scm_import_ice_key(const u8 *raw_key, size_t raw_key_size,
+				   u8 *lt_key, size_t lt_key_size);
 extern bool qcom_scm_ice_available(void);
 extern int qcom_scm_ice_invalidate_key(u32 index);
 extern int qcom_scm_ice_set_key(u32 index, const u8 *key, u32 key_size,

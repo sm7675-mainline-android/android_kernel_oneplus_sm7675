@@ -26,7 +26,7 @@ int crypto_qti_program_key(const struct ice_mmio_data *mmio_data,
 	if (err)
 		return -ENOMEM;
 
-	memcpy(shm.vaddr, key->raw, key->size);
+	memcpy(shm.vaddr, key->bytes, key->size);
 	qtee_shmbridge_flush_shm_buf(&shm);
 
 	err = qcom_scm_config_set_ice_key(slot, shm.paddr, key->size,
