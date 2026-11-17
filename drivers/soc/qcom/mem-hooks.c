@@ -23,6 +23,11 @@
 static uint kswapd_threads;
 module_param_named(kswapd_threads, kswapd_threads, uint, 0644);
 
+/* 6.18 headers do not carry the vendor MAX_KSWAPD_THREADS definition. */
+#ifndef MAX_KSWAPD_THREADS
+#define MAX_KSWAPD_THREADS 16
+#endif
+
 /* Taken from arch/arm64/mm/fault.c */
 static bool is_el1_instruction_abort(unsigned long esr)
 {
@@ -43,6 +48,10 @@ static void balance_reclaim(void *unused, bool *balance_anon_file_reclaim)
 	*balance_anon_file_reclaim = true;
 }
 
+/* 6.18 has neither the per-node multi-kswapd patch in mm/vmscan.c nor the
+ * android_vh_kswapd_per_node vendor hook, so this tuning cannot be carried
+ * over.  Keep the module's remaining hooks working instead. */
+#ifdef KPORT_HAVE_KSWAPD_PER_NODE_HOOK
 static int kswapd_per_node_run(int nid, unsigned int kswapd_threads)
 {
 	pg_data_t *pgdat = NODE_DATA(nid);
@@ -101,6 +110,7 @@ static void kswapd_threads_set(void *unused, int nid, bool *skip, bool run)
 		kswapd_per_node_stop(nid, kswapd_threads);
 
 }
+#endif /* KPORT_HAVE_KSWAPD_PER_NODE_HOOK */
 
 static int init_kswapd_per_node_hook(void)
 {
@@ -111,6 +121,7 @@ static int init_kswapd_per_node_hook(void)
 		pr_err("Failed to set kswapd_threads to %d ,Max limit is %d\n",
 				kswapd_threads, MAX_KSWAPD_THREADS);
 		return ret;
+#ifdef KPORT_HAVE_KSWAPD_PER_NODE_HOOK
 	} else if (kswapd_threads > 1) {
 		ret = register_trace_android_vh_kswapd_per_node(kswapd_threads_set, NULL);
 		if (ret) {
@@ -119,6 +130,7 @@ static int init_kswapd_per_node_hook(void)
 		}
 		for_each_node_state(nid, N_MEMORY)
 			kswapd_per_node_run(nid, kswapd_threads);
+#endif
 	}
 	return ret;
 }
@@ -141,6 +153,7 @@ static int __init init_mem_hooks(void)
 		}
 	}
 
+#ifdef KPORT_HAVE_SCAN_ABORT_WMARKS_HOOK
 	if (IS_ENABLED(CONFIG_LRU_GEN)) {
 		ret = register_trace_android_vh_scan_abort_check_wmarks(
 							scan_abort_checks,
@@ -150,6 +163,7 @@ static int __init init_mem_hooks(void)
 			return ret;
 		}
 	}
+#endif
 
 	ret = register_trace_android_vh_try_fixup_sea(can_fixup_sea, NULL);
 	if (ret) {

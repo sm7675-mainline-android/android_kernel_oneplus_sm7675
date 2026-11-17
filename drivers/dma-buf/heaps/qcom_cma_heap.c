@@ -84,8 +84,8 @@ err:
 /* dmabuf heap CMA operations functions */
 struct dma_buf *cma_heap_allocate(struct dma_heap *heap,
 				  unsigned long len,
-				  unsigned long fd_flags,
-				  unsigned long heap_flags)
+				  u32 fd_flags,
+				  u64 heap_flags)
 {
 	struct cma_heap *cma_heap;
 	struct qcom_sg_buffer *helper_buffer;
@@ -163,8 +163,10 @@ struct dma_buf *cma_heap_allocate(struct dma_heap *heap,
 	sg_set_page(helper_buffer->sg_table.sgl, cma_pages, size, 0);
 
 	helper_buffer->vmperm = mem_buf_vmperm_alloc(&helper_buffer->sg_table);
-	if (IS_ERR(helper_buffer->vmperm))
+	if (IS_ERR(helper_buffer->vmperm)) {
+		ret = PTR_ERR(helper_buffer->vmperm);
 		goto free_sgtable;
+	}
 
 	if (helper_buffer->uncached && !cma_heap->is_nomap) {
 		dma_map_sgtable(dma_heap_get_dev(heap), &helper_buffer->sg_table,
@@ -197,6 +199,8 @@ free_cma:
 	else
 		cma_release(cma_heap->cma, cma_pages, nr_pages);
 free_info:
+	pr_debug("%s: allocation of %lu bytes failed: %d\n",
+		 dma_heap_get_name(heap), len, ret);
 	kfree(info);
 	return ERR_PTR(ret);
 }
@@ -216,6 +220,11 @@ static int __add_cma_heap(struct platform_heap *heap_data, void *data)
 		return -ENOMEM;
 
 	cma_heap->cma = heap_data->dev->cma_area;
+	if (!cma_heap->cma && !dmabuf_cma_is_nomap(heap_data->dev)) {
+		pr_err("%s: missing reserved CMA region\n", heap_data->name);
+		kfree(cma_heap);
+		return -ENODEV;
+	}
 	cma_heap->max_align = CONFIG_CMA_ALIGNMENT;
 	if (heap_data->max_align)
 		cma_heap->max_align = heap_data->max_align;

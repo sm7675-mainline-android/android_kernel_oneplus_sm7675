@@ -112,7 +112,7 @@ struct mem_buf_retrieve_kernel_arg {
 struct dma_buf *mem_buf_retrieve(struct mem_buf_retrieve_kernel_arg *arg);
 int mem_buf_reclaim(struct dma_buf *dmabuf);
 
-#if IS_ENABLED(CONFIG_QCOM_MEM_BUF)
+#if IS_ENABLED(CONFIG_QCOM_MEM_BUF) || IS_ENABLED(CONFIG_QCOM_MEM_BUF_DEV)
 
 void *mem_buf_alloc(struct mem_buf_allocation_data *alloc_data);
 void mem_buf_free(void *membuf);
@@ -131,10 +131,12 @@ static inline struct gh_sgl_desc *mem_buf_get_sgl(void *membuf)
 {
 	return ERR_PTR(-EINVAL);
 }
+#if !IS_ENABLED(CONFIG_QCOM_MEM_BUF_DEV)
 static inline int mem_buf_current_vmid(void)
 {
 	return -EINVAL;
 }
+#endif
 #endif /* CONFIG_QCOM_MEM_BUF */
 
 

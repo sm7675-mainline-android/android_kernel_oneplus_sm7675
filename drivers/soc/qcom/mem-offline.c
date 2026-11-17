@@ -55,7 +55,7 @@ MODULE_PARM_DESC(bypass_send_msg,
 
 static unsigned long start_section_nr, end_section_nr;
 static struct kobject *kobj;
-static unsigned int sections_per_block;
+static unsigned int memoff_sections_per_block;
 static atomic_t target_migrate_pages = ATOMIC_INIT(0);
 static u32 offline_granule;
 static bool is_rpm_controller;
@@ -161,7 +161,7 @@ static void record_stat(unsigned long sec, ktime_t delay, int mode)
 {
 	unsigned int total_sec = end_section_nr - start_section_nr + 1;
 	unsigned int blk_nr = (sec - start_section_nr + mode * total_sec) /
-				sections_per_block;
+				memoff_sections_per_block;
 	ktime_t now, delta;
 
 	if (sec > end_section_nr)
@@ -190,7 +190,7 @@ static void record_stat(unsigned long sec, ktime_t delay, int mode)
 	/* since other state has gone inactive, update the stats */
 	mode = mode ? MEMORY_ONLINE : MEMORY_OFFLINE;
 	blk_nr = (sec - start_section_nr + mode * total_sec) /
-				sections_per_block;
+				memoff_sections_per_block;
 	delta = ktime_sub(now, mem_info[blk_nr].resident_since);
 	mem_info[blk_nr].resident_time =
 			ktime_add(mem_info[blk_nr].resident_time, delta);
@@ -438,7 +438,7 @@ static int mem_change_refresh_state(struct memory_notify *mn,
 	int start = SECTION_ALIGN_DOWN(mn->start_pfn);
 	unsigned long sec_nr = pfn_to_section_nr(start);
 	bool online = (state == MEMORY_ONLINE) ? true : false;
-	unsigned long idx = (sec_nr - start_section_nr) / sections_per_block;
+	unsigned long idx = (sec_nr - start_section_nr) / memoff_sections_per_block;
 	int ret, count;
 	unsigned long addr;
 	int seg_idx;
@@ -546,7 +546,7 @@ static int mem_event_callback(struct notifier_block *self,
 		pr_debug("mem-offline: MEM_GOING_ONLINE : start = 0x%llx end = 0x%llx\n",
 				start_addr, end_addr);
 		++mem_info[(sec_nr - start_section_nr + MEMORY_ONLINE *
-			   idx) / sections_per_block].fail_count;
+			   idx) / memoff_sections_per_block].fail_count;
 		cur = ktime_get();
 
 		if (mem_change_refresh_state(mn, MEMORY_ONLINE))
@@ -569,7 +569,7 @@ static int mem_event_callback(struct notifier_block *self,
 		pr_debug("mem-offline: MEM_GOING_OFFLINE : start = 0x%llx end = 0x%llx\n",
 				start_addr, end_addr);
 		++mem_info[(sec_nr - start_section_nr + MEMORY_OFFLINE *
-			   idx) / sections_per_block].fail_count;
+			   idx) / memoff_sections_per_block].fail_count;
 		has_pend_offline_req = true;
 		cancel_work_sync(&fill_movable_zone_work);
 		cur = ktime_get();
@@ -616,7 +616,7 @@ static int mem_online_remaining_blocks(void)
 	pr_debug("mem-offline: memblock_end_of_DRAM 0x%lx\n", memblock_end_of_DRAM());
 
 	block_size = memory_block_size_bytes();
-	sections_per_block = block_size / MIN_MEMORY_BLOCK_SIZE;
+	memoff_sections_per_block = block_size / MIN_MEMORY_BLOCK_SIZE;
 
 	start_section_nr = pfn_to_section_nr(memblock_end_pfn);
 	end_section_nr = pfn_to_section_nr(ram_end_pfn);
@@ -669,14 +669,14 @@ static int mem_online_remaining_blocks(void)
 		offlinable_region_start_addr);
 
 	for (memblock = start_section_nr; memblock <= end_section_nr;
-			memblock += sections_per_block) {
+			memblock += memoff_sections_per_block) {
 		if (!test_bit(memblock - start_section_nr, movable_bitmap))
 			continue;
 
 		pfn = section_nr_to_pfn(memblock);
 		phys_addr = __pfn_to_phys(pfn);
 
-		if (phys_addr & (((PAGES_PER_SECTION * sections_per_block)
+		if (phys_addr & (((PAGES_PER_SECTION * memoff_sections_per_block)
 					<< PAGE_SHIFT) - 1)) {
 			fail = 1;
 			pr_warn("mem-offline: PFN of mem%lu block not aligned to section start. Not adding this memory block\n",
@@ -685,7 +685,7 @@ static int mem_online_remaining_blocks(void)
 		}
 		nid = memory_add_physaddr_to_nid(phys_addr);
 		if (add_memory(nid, phys_addr,
-				 MIN_MEMORY_BLOCK_SIZE * sections_per_block, MHP_NONE)) {
+				 MIN_MEMORY_BLOCK_SIZE * memoff_sections_per_block, MHP_NONE)) {
 			pr_warn("mem-offline: Adding memory block mem%lu failed\n",
 								memblock);
 			fail = 1;
@@ -834,8 +834,8 @@ static ssize_t show_mem_stats(struct kobject *kobj,
 				struct kobj_attribute *attr, char *buf)
 {
 
-	unsigned int blk_start = start_section_nr / sections_per_block;
-	unsigned int blk_end = end_section_nr / sections_per_block;
+	unsigned int blk_start = start_section_nr / memoff_sections_per_block;
+	unsigned int blk_end = end_section_nr / memoff_sections_per_block;
 	unsigned int tot_blks = blk_end - blk_start;
 	ktime_t *total_time;
 	unsigned int idx = tot_blks + 1;
@@ -1005,7 +1005,7 @@ static unsigned long get_anon_movable_pages(
 			unsigned long freepage_order;
 
 			freepage_order = READ_ONCE(page_private(page));
-			if (freepage_order > 0 && freepage_order < MAX_ORDER)
+			if (freepage_order > 0 && freepage_order <= MAX_PAGE_ORDER)
 				pfn += (1 << page_private(page)) - 1;
 			continue;
 		}
@@ -1108,7 +1108,7 @@ static void isolate_free_pages(struct movable_zone_fill_control *fc)
 			continue;
 
 		INIT_LIST_HEAD(&tmp);
-		isolated = isolate_and_split_free_page(page, &tmp);
+		isolated = isolate_and_split_free_page(page, &tmp, GFP_KERNEL);
 		if (!isolated) {
 			fc->start_pfn = ALIGN(fc->start_pfn, pageblock_nr_pages);
 			goto out;
@@ -1320,7 +1320,7 @@ static int mem_sysfs_create_memblocks(struct kobject *parent_kobj)
 	int ret;
 
 	for (memblock = start_section_nr; memblock <= end_section_nr;
-			memblock += sections_per_block) {
+			memblock += memoff_sections_per_block) {
 		ret = scnprintf(memblkstr, sizeof(memblkstr), MEMBLOCK_NAME, memblock);
 		if (ret <= 0)
 			return -EINVAL;
@@ -1758,7 +1758,7 @@ static int mem_offline_driver_probe(struct platform_device *pdev)
 			num_ddr_regions, num_segments);
 
 	total_blks = (end_section_nr - start_section_nr + 1) /
-			sections_per_block;
+			memoff_sections_per_block;
 	mem_info = kcalloc(total_blks * MAX_STATE, sizeof(*mem_info),
 			   GFP_KERNEL);
 	if (!mem_info)
@@ -1784,7 +1784,7 @@ static int mem_offline_driver_probe(struct platform_device *pdev)
 		goto err_free_mem_sec_state;
 	}
 
-	if (register_hotmemory_notifier(&hotplug_memory_callback_nb)) {
+	if (register_memory_notifier(&hotplug_memory_callback_nb)) {
 		pr_err("mem-offline: Registering memory hotplug notifier failed\n");
 		ret = -ENODEV;
 		goto err_sysfs_remove_group;

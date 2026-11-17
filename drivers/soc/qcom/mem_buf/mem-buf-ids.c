@@ -274,7 +274,8 @@ static int mem_buf_vm_add_self(void)
 	return 0;
 }
 
-static char *mem_buf_vm_devnode(struct device *dev, umode_t *mode)
+/* Match the const device argument expected by class.devnode and KCFI. */
+static char *mem_buf_vm_devnode(const struct device *dev, umode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, "mem_buf_vm/%s", dev_name(dev));
 }
@@ -304,7 +305,7 @@ int mem_buf_vm_init(struct device *dev)
 	if (ret)
 		return ret;
 
-	mem_buf_vm_class = class_create(THIS_MODULE, DEVNAME);
+	mem_buf_vm_class = class_create(DEVNAME);
 	if (IS_ERR(mem_buf_vm_class)) {
 		ret = PTR_ERR(mem_buf_vm_class);
 		goto err_class_create;

@@ -165,7 +165,7 @@ static ssize_t iommu_debug_map_write(struct file *file, const char __user *ubuf,
 		return -EINVAL;
 	}
 
-	ret = iommu_map(ddev->domain, iova, phys, size, prot);
+	ret = iommu_map(ddev->domain, iova, phys, size, prot, GFP_KERNEL);
 	if (ret) {
 		pr_err_ratelimited("iommu_map failed with %d\n", ret);
 		retval = -EIO;
@@ -1321,7 +1321,7 @@ static void iommu_debug_device_profiling(struct seq_file *s, struct iommu_debug_
 			tbefore = ktime_get();
 			if (iommu_map(domain, __ALIGN_MASK(iova, align_mask),
 				      ALIGN(paddr, size), size,
-				      IOMMU_READ | IOMMU_WRITE)) {
+				      IOMMU_READ | IOMMU_WRITE, GFP_KERNEL)) {
 				seq_puts(s, "Failed to map\n");
 				continue;
 			}

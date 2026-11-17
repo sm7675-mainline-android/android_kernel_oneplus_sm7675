@@ -1193,9 +1193,7 @@ arm_lpae_alloc_pgtable(struct io_pgtable_cfg *cfg)
 	data->pgd_bits = va_bits - (data->bits_per_level * (levels - 1));
 
 	data->iop.ops = (struct io_pgtable_ops) {
-		.map		= qcom_arm_lpae_map,
 		.map_pages	= qcom_arm_lpae_map_pages,
-		.unmap		= qcom_arm_lpae_unmap,
 		.unmap_pages	= qcom_arm_lpae_unmap_pages,
 		.iova_to_phys	= arm_lpae_iova_to_phys,
 	};

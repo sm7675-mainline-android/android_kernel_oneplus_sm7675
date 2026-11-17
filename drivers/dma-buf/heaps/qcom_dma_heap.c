@@ -188,8 +188,22 @@ static struct mtrack_debugger dmabuf_mtrack_debugger = {
 };
 #endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE */
 
+/*
+ * 6.18 has no CONFIG_DMABUF_HEAPS_DEFERRED_FREE, so deferred-free-helper.c is
+ * linked into this module instead of being a built-in kernel service.  Its
+ * module_init() is compiled out (see QCOM_DMA_HEAPS_COMPOSITE) and we drive the
+ * initialisation from here.
+ */
+int deferred_freelist_init(void);
+
 static int __init init_heap_driver(void)
 {
+	int ret;
+
+	ret = deferred_freelist_init();
+	if (ret)
+		return ret;
+
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE)
 	register_mtrack_debugger(MTRACK_DMABUF, &dmabuf_mtrack_debugger);
 #endif /* CONFIG_OPLUS_FEATURE_MM_OSVELTE */
@@ -197,4 +211,6 @@ static int __init init_heap_driver(void)
 }
 module_init(init_heap_driver);
 
+MODULE_IMPORT_NS("DMA_BUF");
+MODULE_IMPORT_NS("DMA_BUF_HEAP");
 MODULE_LICENSE("GPL v2");

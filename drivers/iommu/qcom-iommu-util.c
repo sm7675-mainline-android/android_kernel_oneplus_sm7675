@@ -232,10 +232,7 @@ EXPORT_SYMBOL(qcom_iommu_generate_resv_regions);
 
 void qcom_iommu_get_resv_regions(struct device *dev, struct list_head *list)
 {
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
-
-	if (ops && ops->get_resv_regions)
-		ops->get_resv_regions(dev, list);
+	iommu_get_resv_regions(dev, list);
 }
 EXPORT_SYMBOL(qcom_iommu_get_resv_regions);
 
@@ -812,10 +809,6 @@ out_undo:
 	}
 	return ret;
 }
-#if IS_MODULE(CONFIG_QCOM_IOMMU_UTIL)
 module_init(qcom_iommu_util_init);
-#else
-arch_initcall_sync(qcom_iommu_util_init);
-#endif
 
 MODULE_LICENSE("GPL v2");

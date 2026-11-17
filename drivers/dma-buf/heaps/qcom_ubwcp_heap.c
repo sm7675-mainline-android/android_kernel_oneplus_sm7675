@@ -301,8 +301,8 @@ EXPORT_SYMBOL(msm_ubwcp_dma_buf_configure_mmap);
 
 static struct dma_buf *ubwcp_allocate(struct dma_heap *heap,
 				      unsigned long len,
-				      unsigned long fd_flags,
-				      unsigned long heap_flags)
+				      u32 fd_flags,
+				      u64 heap_flags)
 {
 	struct ubwcp_buffer *buffer;
 	struct qcom_ubwcp_heap *ubwcp_heap;
@@ -467,4 +467,4 @@ int msm_ubwcp_set_ops(init_buffer init_buf_fn_ptr,
 }
 EXPORT_SYMBOL(msm_ubwcp_set_ops);
 
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");

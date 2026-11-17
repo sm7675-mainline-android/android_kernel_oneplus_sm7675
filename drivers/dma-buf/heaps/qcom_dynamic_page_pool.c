@@ -110,6 +110,11 @@ struct dynamic_page_pool *dynamic_page_pool_create(gfp_t gfp_mask, unsigned int 
 	pool->gfp_mask = gfp_mask | __GFP_COMP;
 	pool->order = order;
 	spin_lock_init(&pool->lock);
+	atomic_set(&pool->count, 0);
+	pool->vmid = 0;
+	pool->prerelease_callback = NULL;
+	pool->last_low_watermark_ktime = 0;
+	pool->refill_worker = NULL;
 
 	mutex_lock(&pool_list_lock);
 	list_add(&pool->list, &pool_list);
@@ -300,10 +305,6 @@ struct dynamic_page_pool **dynamic_page_pool_create_pools(int vmid,
 	for (i = 0; i < NUM_ORDERS; i++) {
 		pool_list[i] = dynamic_page_pool_create(order_flags[i],
 							orders[i]);
-		pool_list[i]->vmid = vmid;
-		pool_list[i]->prerelease_callback = callback;
-		atomic_set(&pool_list[i]->count, 0);
-		pool_list[i]->last_low_watermark_ktime = 0;
 
 		if (IS_ERR_OR_NULL(pool_list[i])) {
 			int j;
@@ -316,6 +317,10 @@ struct dynamic_page_pool **dynamic_page_pool_create_pools(int vmid,
 			ret = -ENOMEM;
 			goto free_pool_arr;
 		}
+		mutex_lock(&pool_list_lock);
+		pool_list[i]->vmid = vmid;
+		pool_list[i]->prerelease_callback = callback;
+		mutex_unlock(&pool_list_lock);
 	}
 
 	return pool_list;
@@ -336,24 +341,29 @@ void dynamic_page_pool_release_pools(struct dynamic_page_pool **pool_list)
 	kfree(pool_list);
 }
 
-static struct shrinker pool_shrinker = {
-	.count_objects = dynamic_page_pool_shrink_count,
-	.scan_objects = dynamic_page_pool_shrink_scan,
-	.seeks = DEFAULT_SEEKS,
-	.batch = 0,
-};
+static struct shrinker *pool_shrinker;
 
 int dynamic_page_pool_init_shrinker(void)
 {
-	int ret;
 	static bool registered;
 
 	if (registered)
 		return 0;
 
-	ret = register_shrinker(&pool_shrinker, "dynamic_page_pool");
-	if (ret)
-		return ret;
+	/*
+	 * 6.12+ removed register_shrinker(shrinker, name).  The shrinker is now
+	 * heap allocated with shrinker_alloc() and registered separately.
+	 */
+	pool_shrinker = shrinker_alloc(0, "dynamic_page_pool");
+	if (!pool_shrinker)
+		return -ENOMEM;
+
+	pool_shrinker->count_objects = dynamic_page_pool_shrink_count;
+	pool_shrinker->scan_objects = dynamic_page_pool_shrink_scan;
+	pool_shrinker->seeks = DEFAULT_SEEKS;
+	pool_shrinker->batch = 0;
+
+	shrinker_register(pool_shrinker);
 
 	registered = true;
 	return 0;

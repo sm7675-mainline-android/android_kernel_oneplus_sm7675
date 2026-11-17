@@ -99,12 +99,7 @@ static unsigned long freelist_shrink_scan(struct shrinker *shrinker,
 	return total_freed;
 }
 
-static struct shrinker freelist_shrinker = {
-	.count_objects = freelist_shrink_count,
-	.scan_objects = freelist_shrink_scan,
-	.seeks = DEFAULT_SEEKS,
-	.batch = 0,
-};
+static struct shrinker *freelist_shrinker;
 
 static int deferred_free_thread(void *data)
 {
@@ -118,7 +113,7 @@ static int deferred_free_thread(void *data)
 	return 0;
 }
 
-static int deferred_freelist_init(void)
+int deferred_freelist_init(void)
 {
 	list_nr_pages = 0;
 
@@ -131,8 +126,27 @@ static int deferred_freelist_init(void)
 	}
 	sched_set_normal(freelist_task, 19);
 
-	return register_shrinker(&freelist_shrinker, "dmabuf-deferred-free-shrinker");
+	/* 6.12+: shrinkers are heap allocated by shrinker_alloc(). */
+	freelist_shrinker = shrinker_alloc(0, "dmabuf-deferred-free-shrinker");
+	if (!freelist_shrinker)
+		return -ENOMEM;
+
+	freelist_shrinker->count_objects = freelist_shrink_count;
+	freelist_shrinker->scan_objects = freelist_shrink_scan;
+	freelist_shrinker->seeks = DEFAULT_SEEKS;
+	freelist_shrinker->batch = 0;
+
+	shrinker_register(freelist_shrinker);
+	return 0;
 }
+/*
+ * When this file is linked into qcom_dma_heaps.ko (6.18 has no
+ * CONFIG_DMABUF_HEAPS_DEFERRED_FREE), module_init() would emit a second
+ * init_module().  qcom_dma_heap.c calls deferred_freelist_init() from its own
+ * module_init instead.
+ */
+#ifndef QCOM_DMA_HEAPS_COMPOSITE
 module_init(deferred_freelist_init);
+#endif
 MODULE_LICENSE("GPL v2");
 

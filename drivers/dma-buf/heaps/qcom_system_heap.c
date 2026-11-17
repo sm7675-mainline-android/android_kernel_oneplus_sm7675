@@ -181,7 +181,7 @@ static bool __dynamic_pool_zone_watermark_ok(struct zone *z, unsigned int order,
 				continue;
 #endif
 
-			if (!free_area_empty(area, mt))
+			if (!list_empty(&area->free_list[mt]))
 				return true;
 		}
 	}
@@ -570,8 +570,8 @@ free_mem:
 
 static struct dma_buf *system_heap_allocate(struct dma_heap *heap,
 					    unsigned long len,
-					    unsigned long fd_flags,
-					    unsigned long heap_flags)
+					    u32 fd_flags,
+					    u64 heap_flags)
 {
 	struct qcom_sg_buffer *buffer;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
@@ -604,11 +604,11 @@ static struct dma_buf *system_heap_allocate(struct dma_heap *heap,
 	}
         //add by zhenghaiqing for dma debug
         /*
-	 * use android_kabi_reserved2 as inode no. but it has potential risk if
+	 * use __kabi_reserved2 as inode no. but it has potential risk if
 	 * google uses it.
 	 */
-	dmabuf->android_kabi_reserved2 = file_inode(dmabuf->file)->i_ino;
-	trace_qcom_dma_alloc(len, dmabuf->android_kabi_reserved2,
+	dmabuf->__kabi_reserved2 = file_inode(dmabuf->file)->i_ino;
+	trace_qcom_dma_alloc(len, dmabuf->__kabi_reserved2,
 			     exp_info.exp_name ?: "NULL");
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE)
@@ -627,7 +627,7 @@ free_buf_struct:
 	return ERR_PTR(ret);
 }
 
-static long get_pool_size_bytes(struct dma_heap *heap)
+__maybe_unused static long get_pool_size_bytes(struct dma_heap *heap)
 {
 	long total_size = 0;
 	int i;
@@ -641,7 +641,6 @@ static long get_pool_size_bytes(struct dma_heap *heap)
 
 static const struct dma_heap_ops system_heap_ops = {
 	.allocate = system_heap_allocate,
-	.get_pool_size = get_pool_size_bytes,
 };
 
 void qcom_system_heap_create(const char *name, const char *system_alias, bool uncached)
