@@ -110,6 +110,7 @@ enum fltr_config {
 struct llcc_perfmon_private {
 	struct regmap *llcc_map;
 	struct regmap *llcc_bcast_map;
+	struct regmap *bank_map[NUM_CHANNELS];
 	unsigned int bank_off[NUM_CHANNELS];
 	unsigned int num_banks;
 	struct event_port_ops *port_ops[MAX_NUMBER_OF_PORTS];
@@ -171,7 +172,8 @@ static void perfmon_counter_dump(struct llcc_perfmon_private *llcc_priv)
 		counter_map = &llcc_priv->configured[i];
 		offset = LLCC_COUNTER_n_VALUE(llcc_priv->drv_ver, i);
 		for (j = 0; j < llcc_priv->num_banks; j++) {
-			regmap_read(llcc_priv->llcc_map, llcc_priv->bank_off[j] + offset, &val);
+			regmap_read(llcc_priv->bank_map[j] ?: llcc_priv->llcc_map,
+				    llcc_priv->bank_off[j] + offset, &val);
 			counter_map->counter_dump[j] += val;
 		}
 	}
@@ -1045,7 +1047,8 @@ static ssize_t perfmon_scid_status_show(struct device *dev, struct device_attrib
 		total = 0;
 		offset = TRP_SCID_n_STATUS(i);
 		for (j = 0; j < llcc_priv->num_banks; j++) {
-			regmap_read(llcc_priv->llcc_map, llcc_priv->bank_off[j] + offset, &val);
+			regmap_read(llcc_priv->bank_map[j] ?: llcc_priv->llcc_map,
+				    llcc_priv->bank_off[j] + offset, &val);
 			val = (val & TRP_SCID_STATUS_CURRENT_CAP_MASK) >>
 				TRP_SCID_STATUS_CURRENT_CAP_SHIFT;
 			total += val;
@@ -2050,12 +2053,14 @@ static int llcc_perfmon_probe(struct platform_device *pdev)
 	if (!llcc_driv_data)
 		return -ENOMEM;
 
-	if (llcc_driv_data->regmap == NULL || llcc_driv_data->bcast_regmap == NULL)
+	if (llcc_driv_data->regmaps == NULL ||
+	    llcc_driv_data->regmaps[0] == NULL ||
+	    llcc_driv_data->bcast_regmap == NULL)
 		return -ENODEV;
 
-	llcc_priv->llcc_map = llcc_driv_data->regmap;
+	llcc_priv->llcc_map = llcc_driv_data->regmaps[0];
 	llcc_priv->llcc_bcast_map = llcc_driv_data->bcast_regmap;
-	llcc_priv->drv_ver = llcc_driv_data->llcc_ver;
+	llcc_priv->drv_ver = llcc_driv_data->version;
 	offset = LLCC_COMMON_STATUS0(llcc_priv->drv_ver);
 	llcc_bcast_read(llcc_priv, offset, &val);
 	llcc_priv->num_mc = (val & NUM_MC_MASK) >> NUM_MC_SHIFT;
@@ -2065,7 +2070,7 @@ static int llcc_perfmon_probe(struct platform_device *pdev)
 
 	llcc_priv->num_banks = (val & LB_CNT_MASK) >> LB_CNT_SHIFT;
 	for (val = 0; val < llcc_priv->num_banks; val++)
-		llcc_priv->bank_off[val] = llcc_driv_data->offsets[val];
+		llcc_priv->bank_map[val] = llcc_driv_data->regmaps[val];
 
 	llcc_priv->clock = devm_clk_get(&pdev->dev, "qdss_clk");
 	if (IS_ERR_OR_NULL(llcc_priv->clock)) {

@@ -12,13 +12,27 @@
 #include <linux/of.h>
 #include <asm/current.h>
 #include <trace/hooks/mpam.h>
-#include <linux/sched/walt.h>
 #include <soc/qcom/mpam.h>
 #include <trace/hooks/sched.h>
 #include <trace/events/sched.h>
 #include <trace/events/task.h>
-#include "../../../kernel/sched/walt/walt.h"
 #include "mpam_regs.h"
+
+/* The upstream 6.18 tree has no WALT scheduler, hence no struct
+ * walt_task_struct. mpam_game only ever uses the mpam_partid member, so keep
+ * that single value in the task_struct vendor-data slot that WALT would
+ * otherwise have used for its per-task pointer.
+ */
+#define MPAM_PARTID_SLOT 0
+static inline int mpam_get_partid(struct task_struct *p)
+{
+	return (int)p->android_vendor_data1[MPAM_PARTID_SLOT];
+}
+
+static inline void mpam_set_partid(struct task_struct *p, int partid)
+{
+	p->android_vendor_data1[MPAM_PARTID_SLOT] = (u64)partid;
+}
 
 #define RESERVED_PARTID 16
 #define MPAM_GAME_SUPPORT_MODEL "pineapple"
@@ -119,12 +133,10 @@ static ssize_t pids_show(char *buf, u8 part_id)
 {
 	ssize_t len = 0;
 	struct task_struct *p, *t;
-	struct walt_task_struct *wts;
 
 	rcu_read_lock();
 	for_each_process_thread(p, t) {
-		wts = (struct walt_task_struct *) t->android_vendor_data1;
-		if (wts->mpam_partid == part_id)
+		if (mpam_get_partid(t) == part_id)
 			len += scnprintf(buf + len, PAGE_SIZE - len, "%d ", t->pid);
 	}
 	rcu_read_unlock();
@@ -139,7 +151,6 @@ static void pids_store(const char *buf, u8 part_id)
 	pid_t pid_input;
 	char *kbuf, *token;
 	struct task_struct *p;
-	struct walt_task_struct *wts;
 
 	kbuf = (char *)buf;
 	while ((token = strsep(&kbuf, " ")) != NULL) {
@@ -155,8 +166,7 @@ static void pids_store(const char *buf, u8 part_id)
 			continue;
 		}
 
-		wts = (struct walt_task_struct *) p->android_vendor_data1;
-		wts->mpam_partid = part_id;
+		mpam_set_partid(p, part_id);
 	}
 }
 
@@ -181,17 +191,11 @@ static ssize_t low_prio_pids_show(struct kobject *kobj, struct kobj_attribute *a
 void init_task_mapm(void)
 {
 	struct task_struct *g, *p;
-	struct walt_task_struct *wts = NULL;
 
-	read_lock(&tasklist_lock);
-
-	do_each_thread(g, p) {
-		wts = (struct walt_task_struct *) p->android_vendor_data1;
-		wts->mpam_partid = 16;
-	} while_each_thread(g, p);
-
-
-	read_unlock(&tasklist_lock);
+	rcu_read_lock();
+	for_each_process_thread(g, p)
+		mpam_set_partid(p, RESERVED_PARTID);
+	rcu_read_unlock();
 }
 static ssize_t reset_prio_pids_show(struct kobject *kobj, struct kobj_attribute *attr,
 				char *buf)
@@ -241,10 +245,7 @@ static void mpam_write_partid(u8 partid, pid_t next_pid)
 static void mpam_game_switch_task(void *unused, struct task_struct *prev,
 							struct task_struct *next)
 {
-	struct walt_task_struct *wts;
-
-	wts = (struct walt_task_struct *) next->android_vendor_data1;
-	mpam_write_partid(wts->mpam_partid, next->pid);
+	mpam_write_partid(mpam_get_partid(next), next->pid);
 }
 
 static struct attribute *mpam_game_attrs[] = {
@@ -266,12 +267,9 @@ static const struct attribute_group mpam_game_group = {
 static void mpam_game_fork(void *unused, struct task_struct *t)
 {
 	u8 part_id;
-	struct walt_task_struct *wts;
 
-	wts =  (struct walt_task_struct *)current->android_vendor_data1;
-	part_id = wts->mpam_partid;
-	wts =  (struct walt_task_struct *)t->android_vendor_data1;
-	wts->mpam_partid = part_id;
+	part_id = mpam_get_partid(current);
+	mpam_set_partid(t, part_id);
 }
 
 static int __init mpam_game_init(void)

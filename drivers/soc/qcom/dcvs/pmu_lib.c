@@ -1213,7 +1213,7 @@ skip_pmu:
 	}
 
 	ret = kobject_init_and_add(&pmu_kobj, &pmu_settings_ktype,
-				   &cpu_subsys.dev_root->kobj, "pmu_lib");
+				   &bus_get_dev_root(&cpu_subsys)->kobj, "pmu_lib");
 	if (ret < 0) {
 		dev_err(dev, "failed to init pmu counters kobj: %d\n", ret);
 		kobject_put(&pmu_kobj);

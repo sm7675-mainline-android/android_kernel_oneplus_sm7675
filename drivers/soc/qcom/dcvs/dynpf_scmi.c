@@ -130,7 +130,7 @@ static int qcom_dynpf_probe(struct platform_device *pdev)
 	}
 
 	ret = kobject_init_and_add(&dynpf_kobj, &dynpf_settings_ktype,
-				   &cpu_subsys.dev_root->kobj, "dynpf");
+				   &kport_bus_dev_root(&cpu_subsys)->kobj, "dynpf");
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to init dynpf kobj: %d\n", ret);
 		kobject_put(&dynpf_kobj);

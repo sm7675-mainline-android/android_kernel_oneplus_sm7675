@@ -315,7 +315,7 @@ static int scmi_c1dcvs_probe(struct platform_device *pdev)
 	}
 
 	ret = kobject_init_and_add(&c1dcvs_kobj, &c1dcvs_settings_ktype,
-				   &cpu_subsys.dev_root->kobj, "c1dcvs");
+				   &kport_bus_dev_root(&cpu_subsys)->kobj, "c1dcvs");
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to init c1 dcvs kobj: %d\n", ret);
 		kobject_put(&c1dcvs_kobj);

@@ -205,7 +205,7 @@ void remove_global_sysfs_nodes(void)
 
 int create_global_sysfs_nodes(void)
 {
-	struct kobject *cpuidle_kobj = &cpu_subsys.dev_root->kobj;
+	struct kobject *cpuidle_kobj = &kport_bus_dev_root(&cpu_subsys)->kobj;
 
 	qcom_lpm_kobj = kobject_create_and_add(KBUILD_MODNAME, cpuidle_kobj);
 	if (!qcom_lpm_kobj)

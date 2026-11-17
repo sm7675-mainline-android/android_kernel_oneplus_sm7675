@@ -506,7 +506,7 @@ static void qcom_lmh_dcvs_notify(struct qcom_cpufreq_data *data)
 	trace_dcvsh_freq(cpu, qcom_cpufreq_get_freq(cpu), throttled_freq, thermal_pressure);
 
 	/* Update thermal pressure (the boost frequencies are accepted) */
-	arch_update_thermal_pressure(policy->related_cpus, thermal_pressure);
+	arch_update_hw_pressure(policy->related_cpus, thermal_pressure);
 	data->dcvsh_freq_limit = thermal_pressure;
 
 out:
@@ -708,7 +708,7 @@ static int qcom_cpufreq_hw_cpu_offline(struct cpufreq_policy *policy)
 	irq_set_affinity_and_hint(data->throttle_irq, NULL);
 	disable_irq_nosync(data->throttle_irq);
 
-	arch_update_thermal_pressure(policy->related_cpus, U32_MAX);
+	arch_update_hw_pressure(policy->related_cpus, U32_MAX);
 	trace_dcvsh_throttle(cpumask_first(policy->related_cpus), 0);
 
 	return 0;
@@ -841,11 +841,6 @@ static int qcom_cpufreq_hw_cpu_init(struct cpufreq_policy *policy)
 		goto error;
 	}
 
-	if (policy_has_boost_freq(policy)) {
-		ret = cpufreq_enable_boost_support();
-		if (ret)
-			dev_warn(cpu_dev, "failed to enable boost: %d\n", ret);
-	}
 
 	ret = qcom_cpufreq_hw_lmh_init(policy, index, cpu_dev);
 	if (ret)
@@ -857,7 +852,7 @@ error:
 	return ret;
 }
 
-static int qcom_cpufreq_hw_cpu_exit(struct cpufreq_policy *policy)
+static void qcom_cpufreq_hw_cpu_exit(struct cpufreq_policy *policy)
 {
 	struct device *cpu_dev = get_cpu_device(policy->cpu);
 
@@ -870,7 +865,6 @@ static int qcom_cpufreq_hw_cpu_exit(struct cpufreq_policy *policy)
 	dev_pm_opp_of_cpumask_remove_table(policy->related_cpus);
 	kfree(policy->freq_table);
 
-	return 0;
 }
 
 static void qcom_cpufreq_ready(struct cpufreq_policy *policy)
@@ -894,12 +888,6 @@ static void qcom_cpufreq_ready(struct cpufreq_policy *policy)
 #endif
 }
 
-static struct freq_attr *qcom_cpufreq_hw_attr[] = {
-	&cpufreq_freq_attr_scaling_available_freqs,
-	&cpufreq_freq_attr_scaling_boost_freqs,
-	NULL
-};
-
 static struct cpufreq_driver cpufreq_qcom_hw_driver = {
 	.flags		= CPUFREQ_NEED_INITIAL_FREQ_CHECK |
 			  CPUFREQ_HAVE_GOVERNOR_PER_POLICY |
@@ -914,7 +902,6 @@ static struct cpufreq_driver cpufreq_qcom_hw_driver = {
 	.register_em	= cpufreq_register_em_with_opp,
 	.fast_switch    = qcom_cpufreq_hw_fast_switch,
 	.name		= "qcom-cpufreq-hw",
-	.attr		= qcom_cpufreq_hw_attr,
 	.ready		= qcom_cpufreq_ready,
 	.boost_enabled	= true,
 };
@@ -964,7 +951,8 @@ static int qcom_cpufreq_hw_driver_probe(struct platform_device *pdev)
 
 static int qcom_cpufreq_hw_driver_remove(struct platform_device *pdev)
 {
-	return cpufreq_unregister_driver(&cpufreq_qcom_hw_driver);
+	cpufreq_unregister_driver(&cpufreq_qcom_hw_driver);
+	return 0;
 }
 
 static struct platform_driver qcom_cpufreq_hw_driver = {

@@ -481,7 +481,7 @@ static int bwprof_dev_probe(struct platform_device *pdev)
 	INIT_WORK(&bwprof_data->work, &bwprof_update_work);
 
 	ret = kobject_init_and_add(&bwprof_data->kobj, &bwprof_ktype,
-			&cpu_subsys.dev_root->kobj, "bw_prof");
+			&kport_bus_dev_root(&cpu_subsys)->kobj, "bw_prof");
 	if (ret < 0) {
 		dev_err(dev, "failed to init bwprof kobj: %d\n", ret);
 		kobject_put(&bwprof_data->kobj);

@@ -662,7 +662,7 @@ static int qcom_dcvs_dev_probe(struct platform_device *pdev)
 	}
 
 	ret = kobject_init_and_add(&dcvs_data->kobj, &qcom_dcvs_ktype,
-			&cpu_subsys.dev_root->kobj, "bus_dcvs");
+			&bus_get_dev_root(&cpu_subsys)->kobj, "bus_dcvs");
 	if (ret < 0) {
 		dev_err(dev, "failed to init qcom-dcvs kobj: %d\n", ret);
 		kobject_put(&dcvs_data->kobj);
@@ -787,10 +787,8 @@ static int qcom_dcvs_path_probe(struct platform_device *pdev)
 			return -EINVAL;
 		}
 		ret = setup_ddrllcc_fp_device(dev, hw, path);
-		if (ret < 0) {
-			dev_err(dev, "Error setting up fp dev: %d\n", ret);
-			return ret;
-		}
+		if (ret < 0)
+			return dev_err_probe(dev, ret, "Error setting up fast path\n");
 		break;
 	case DCVS_PERCPU_PATH:
 		if (hw->type != DCVS_L3 && hw->type != DCVS_L3_1) {

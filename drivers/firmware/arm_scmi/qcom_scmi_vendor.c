@@ -3,7 +3,7 @@
  * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
-#include "common.h"
+#include <drivers/firmware/arm_scmi/protocols.h>
 #include <linux/qcom_scmi_vendor.h>
 
 #define	EXTENDED_MSG_ID			0
@@ -141,8 +141,10 @@ static const struct scmi_protocol qcom_scmi_vendor = {
 	.owner = THIS_MODULE,
 	.instance_init = &qcom_scmi_vendor_protocol_init,
 	.ops = &qcom_proto_ops,
+	.vendor_id = "Qualcomm",
 };
 module_scmi_protocol(qcom_scmi_vendor);
 
 MODULE_DESCRIPTION("qcom scmi vendor Protocol");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("scmi-protocol-0x80-Qualcomm");
