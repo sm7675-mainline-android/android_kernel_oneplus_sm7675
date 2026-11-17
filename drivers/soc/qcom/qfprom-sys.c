@@ -20,10 +20,11 @@ struct qfprom_sys {
 };
 
 static ssize_t qfprom_sys_cell_read(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *attr,
+				const struct bin_attribute *attr,
 				char *buf, loff_t pos, size_t count)
 {
 	struct nvmem_cell *cell;
+	ssize_t ret;
 	size_t len;
 	u8 *data;
 
@@ -33,12 +34,11 @@ static ssize_t qfprom_sys_cell_read(struct file *filp, struct kobject *kobj,
 
 	data = nvmem_cell_read(cell, &len);
 	if (IS_ERR(data))
-		return -EINVAL;
+		return PTR_ERR(data);
 
-	len = min(len, count);
-	memcpy(buf, data, len);
+	ret = memory_read_from_buffer(buf, count, &pos, data, len);
 	kfree(data);
-	return len;
+	return ret;
 }
 
 static int qfprom_sys_probe(struct platform_device *pdev)
@@ -122,18 +122,16 @@ remove_cells:
 	return ret;
 }
 
-static int qfprom_sys_remove(struct platform_device *pdev)
+static void qfprom_sys_remove(struct platform_device *pdev)
 {
 	struct qfprom_sys *priv;
 	int i;
 
 	priv = dev_get_platdata(&pdev->dev);
 	for (i = 0; i < priv->cell_count; i++) {
-		nvmem_cell_put(priv->cells[i]);
 		sysfs_remove_bin_file(&pdev->dev.kobj, priv->attrs[i]);
+		nvmem_cell_put(priv->cells[i]);
 	}
-
-	return 0;
 }
 
 static const struct of_device_id qfprom_sys_of_match[] = {

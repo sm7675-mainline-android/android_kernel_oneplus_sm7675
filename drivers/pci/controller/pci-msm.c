@@ -753,7 +753,7 @@ struct msm_aer_err_info {
 
 	unsigned int status;		/* COR/UNCOR Error Status */
 	unsigned int mask;		/* COR/UNCOR Error Mask */
-	struct aer_header_log_regs tlp;	/* TLP Header */
+	struct pcie_tlp_log tlp;	/* TLP Header */
 
 	u32 l1ss_ctl1;			/* PCI_L1SS_CTL1 reg value */
 	u16 lnksta;			/* PCI_EXP_LNKSTA reg value */
@@ -1254,6 +1254,7 @@ struct msm_pcie_dev_t {
 	bool aer_dump;
 	bool panic_on_aer;
 	struct aer_stats *aer_stats;
+	struct aer_stats aer_stats_store;
 	void (*rumi_init)(struct msm_pcie_dev_t *pcie_dev);
 
 	u32 *filtered_bdfs;
@@ -6488,10 +6489,11 @@ static int msm_pcie_config_device_info(struct pci_dev *pcidev, void *pdev)
 	}
 
 	if (pcie_dev->aer_enable) {
-		if (pci_pcie_type(pcidev) == PCI_EXP_TYPE_ROOT_PORT)
-			pcie_dev->aer_stats = pcidev->aer_stats;
-
-		if (pci_enable_pcie_error_reporting(pcidev))
+		/* 6.18 moved the AER counters into struct aer_info, which is
+		 * private to drivers/pci/pcie/aer.c.  Keep using the driver's
+		 * own counters (allocated in msm_pcie_probe) instead. */
+		if (pcie_capability_set_word(pcidev, PCI_EXP_DEVCTL,
+					     PCI_EXP_AER_FLAGS))
 			PCIE_ERR(pcie_dev,
 				 "PCIe: RC%d: PCIE error reporting unavailable on %02x:%02x:%01x\n",
 				 pcie_dev->rc_idx, pcidev->bus->number,
@@ -6912,7 +6914,9 @@ static void msm_pci_dev_aer_stats_incr(struct pci_dev *pdev,
 	unsigned long status = info->status & ~info->mask;
 	int i, max = -1;
 	u64 *counter = NULL;
-	struct aer_stats *aer_stats = pdev->aer_stats;
+	/* 6.18 moved AER counters out of struct pci_dev into the private
+	 * struct aer_info; the RC driver keeps its own copy in msm_pcie_dev_t. */
+	struct aer_stats *aer_stats = (info && info->rdev) ? info->rdev->aer_stats : NULL;
 
 	if (!aer_stats)
 		return;
@@ -6939,10 +6943,10 @@ static void msm_pci_dev_aer_stats_incr(struct pci_dev *pdev,
 		counter[i]++;
 }
 
-static void msm_pci_rootport_aer_stats_incr(struct pci_dev *pdev,
+static void msm_pci_rootport_aer_stats_incr(struct msm_pcie_dev_t *rdev,
 					    struct aer_err_source *e_src)
 {
-	struct aer_stats *aer_stats = pdev->aer_stats;
+	struct aer_stats *aer_stats = rdev ? rdev->aer_stats : NULL;
 
 	if (!aer_stats)
 		return;
@@ -6962,7 +6966,7 @@ static void msm_print_tlp_header(struct pci_dev *dev,
 				 struct msm_aer_err_info *info)
 {
 	PCIE_DBG(info->rdev, "PCIe: RC%d: TLP Header: %08x %08x %08x %08x\n",
-		info->rdev->rc_idx, info->tlp.dw0, info->tlp.dw1, info->tlp.dw2, info->tlp.dw3);
+		info->rdev->rc_idx, info->tlp.dw[0], info->tlp.dw[1], info->tlp.dw[2], info->tlp.dw[3]);
 }
 
 static void msm_aer_print_error_stats(struct pci_dev *dev,
@@ -7321,13 +7325,13 @@ static int msm_aer_get_device_error_info(struct pci_dev *dev,
 		if (info->status & AER_LOG_TLP_MASKS) {
 			info->tlp_header_valid = 1;
 			pci_read_config_dword(dev,
-				aer + PCI_ERR_HEADER_LOG, &info->tlp.dw0);
+				aer + PCI_ERR_HEADER_LOG, &info->tlp.dw[0]);
 			pci_read_config_dword(dev,
-				aer + PCI_ERR_HEADER_LOG + 4, &info->tlp.dw1);
+				aer + PCI_ERR_HEADER_LOG + 4, &info->tlp.dw[1]);
 			pci_read_config_dword(dev,
-				aer + PCI_ERR_HEADER_LOG + 8, &info->tlp.dw2);
+				aer + PCI_ERR_HEADER_LOG + 8, &info->tlp.dw[2]);
 			pci_read_config_dword(dev,
-				aer + PCI_ERR_HEADER_LOG + 12, &info->tlp.dw3);
+				aer + PCI_ERR_HEADER_LOG + 12, &info->tlp.dw[3]);
 		}
 	}
 
@@ -7356,7 +7360,7 @@ static void msm_aer_isr_one_error(struct msm_pcie_dev_t *dev,
 
 	e_info.rdev = dev;
 
-	msm_pci_rootport_aer_stats_incr(dev->dev, e_src);
+	msm_pci_rootport_aer_stats_incr(dev, e_src);
 
 	/*
 	 * There is a possibility that both correctable error and
@@ -8770,6 +8774,8 @@ static int msm_pcie_probe(struct platform_device *pdev)
 	pcie_dev->rc_idx = rc_idx;
 	pcie_dev->pdev = pdev;
 	pcie_dev->link_status = MSM_PCIE_LINK_DEINIT;
+	/* 6.18 no longer exposes pci_dev::aer_stats; keep the counters local. */
+	pcie_dev->aer_stats = &pcie_dev->aer_stats_store;
 
 	PCIE_DBG(pcie_dev, "PCIe: RC index is %d.\n", pcie_dev->rc_idx);
 

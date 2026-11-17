@@ -377,6 +377,18 @@ static inline bool pci_dev_is_added(const struct pci_dev *dev)
 
 #define AER_MAX_MULTI_ERR_DEVICES	5	/* Not likely to have more */
 
+/* 6.18 removed struct aer_header_log_regs (replaced by struct pcie_tlp_log).
+ * The vendor driver still keeps the four-dword layout, so provide it here. */
+#ifndef KPORT_AER_HEADER_LOG_REGS_DEFINED
+#define KPORT_AER_HEADER_LOG_REGS_DEFINED
+struct aer_header_log_regs {
+	unsigned int dw0;
+	unsigned int dw1;
+	unsigned int dw2;
+	unsigned int dw3;
+};
+#endif
+
 struct aer_err_info {
 	struct pci_dev *dev[AER_MAX_MULTI_ERR_DEVICES];
 	int error_dev_num;
@@ -393,7 +405,7 @@ struct aer_err_info {
 
 	unsigned int status;		/* COR/UNCOR Error Status */
 	unsigned int mask;		/* COR/UNCOR Error Mask */
-	struct aer_header_log_regs tlp;	/* TLP Header */
+	struct pcie_tlp_log tlp;	/* TLP Header */
 };
 
 int aer_get_device_error_info(struct pci_dev *dev, struct aer_err_info *info);

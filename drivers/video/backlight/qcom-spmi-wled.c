@@ -550,7 +550,6 @@ static int wled_update_status(struct backlight_device *bl)
 	int rc;
 
 	if (bl->props.power != FB_BLANK_UNBLANK ||
-	    bl->props.fb_blank != FB_BLANK_UNBLANK ||
 	    bl->props.state & BL_CORE_FBBLANK)
 		brightness = 0;
 

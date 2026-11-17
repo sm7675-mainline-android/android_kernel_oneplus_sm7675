@@ -1804,7 +1804,7 @@ fail:
 	return ret;
 }
 
-static int adc5_gen3_remove(struct platform_device *pdev)
+static void adc5_gen3_remove(struct platform_device *pdev)
 {
 	struct adc5_chip *adc = platform_get_drvdata(pdev);
 	u8 data = 0;
@@ -1847,8 +1847,6 @@ static int adc5_gen3_remove(struct platform_device *pdev)
 	list_del(&adc->list);
 
 	thermal_minidump_unregister(adc->adc_md);
-
-	return 0;
 }
 
 static int adc5_gen3_freeze(struct device *dev)
