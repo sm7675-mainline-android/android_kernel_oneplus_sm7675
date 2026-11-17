@@ -30,7 +30,6 @@
 #include "../../android/debug_kinfo.h"
 
 struct debug_symbol_data {
-	const unsigned long *addresses;
 	const int *offsets;
 	const u8 *names;
 	unsigned int num_syms;
@@ -83,9 +82,7 @@ bool debug_symbol_available(void)
 		return false;
 	}
 
-	if (!debug_symbol.addresses) {
-		debug_symbol.addresses = (unsigned long *)
-						__phys_to_kimg(kinfo->_addresses_pa);
+	if (!debug_symbol.offsets) {
 		debug_symbol.offsets = (int *)
 						__phys_to_kimg(kinfo->_offsets_pa);
 		debug_symbol.names = (u8 *)
@@ -99,6 +96,12 @@ bool debug_symbol_available(void)
 						__phys_to_kimg(kinfo->_token_index_pa);
 		debug_symbol.markers = (unsigned int *)
 						__phys_to_kimg(kinfo->_markers_pa);
+		if (!debug_symbol.offsets || !debug_symbol.names ||
+		    !debug_symbol.token_table || !debug_symbol.token_index ||
+		    !debug_symbol.markers || !debug_symbol.relative_base ||
+		    !debug_symbol.num_syms)
+			return false;
+
 		fill_ds_entries();
 	}
 
@@ -155,16 +158,7 @@ tail:
 /* In line with kallsyms_sym_address from kernel/kallsyms.c */
 static unsigned long debug_symbol_sym_address(int idx)
 {
-	if (!IS_ENABLED(CONFIG_KALLSYMS_BASE_RELATIVE))
-		return debug_symbol.addresses[idx];
-
-	if (!IS_ENABLED(CONFIG_KALLSYMS_ABSOLUTE_PERCPU))
-		return debug_symbol.relative_base + (u32)debug_symbol.offsets[idx];
-
-	if (debug_symbol.offsets[idx] >= 0)
-		return debug_symbol.offsets[idx];
-
-	return debug_symbol.relative_base - 1 - debug_symbol.offsets[idx];
+	return debug_symbol.relative_base + (u32)debug_symbol.offsets[idx];
 }
 
 /* In line with cleanup_symbol_name from kernel/kallsyms.c */

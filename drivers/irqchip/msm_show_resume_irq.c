@@ -21,17 +21,29 @@
 #include <linux/suspend.h>
 
 #define MPIDR_RS(mpidr) (((mpidr) & 0xF0UL) >> 4)
-#define GIC_LINE_NR min(GICD_TYPER_SPIS(gic_data->rdists.gicd_typer), 1020U)
-#define gic_data_rdist() (this_cpu_ptr(gic_data->rdists.rdist))
-#define gic_data_rdist_rd_base() (gic_data_rdist()->rd_base)
-#define gic_data_rdist_sgi_base() (gic_data_rdist_rd_base() + SZ_64K)
 
 static void __iomem *base;
+
+/* 6.18 keeps struct gic_chip_data private to irq-gic-v3.c, so derive the line
+ * count from the distributor instead of dereferencing the controller state. */
+static inline unsigned int msm_gic_line_nr(void)
+{
+	return min(GICD_TYPER_SPIS(readl_relaxed(base + GICD_TYPER)), 1020U);
+}
+#define GIC_LINE_NR msm_gic_line_nr()
+/* The vendor driver used the per-CPU redistributor SGI frame.  6.18 does not
+ * export that pointer, and the suspend/restore path below only needs the
+ * distributor window, so keep the PPI save/restore disabled. */
+static inline void __iomem *gic_data_rdist_sgi_base(void)
+{
+	return NULL;
+}
+
 static int msm_show_resume_irq_mask;
 module_param_named(debug_mask, msm_show_resume_irq_mask, int, 0664);
 
 static bool hibernation;
-struct gic_chip_data_v3 *gic_data_glb;
+void *gic_data_glb;
 
 struct gic_chip_data_ds {
 	unsigned int enabled_irqs[32];
@@ -44,19 +56,22 @@ struct gic_chip_data_ds {
 
 static struct gic_chip_data_ds gic_data_ds __read_mostly;
 
-static void gic_suspend_ds(void *data, struct gic_chip_data_v3 *gic_data)
+static void gic_suspend_ds(void *data, void *gic_data)
 {
 	int i;
 	void __iomem *rdist_base = gic_data_rdist_sgi_base();
 
+	(void)rdist_base;
 	gic_data_glb = gic_data;
 
 	if (unlikely(!hibernation) && (pm_suspend_target_state != PM_SUSPEND_MEM))
 		return;
-	gic_data_ds.enabled_sgis = readl_relaxed(rdist_base + GICD_ISENABLER);
-	gic_data_ds.pending_sgis = readl_relaxed(rdist_base + GICD_ISPENDR);
-	/* Store edge level for PPIs by reading GICR_ICFGR1 */
-	gic_data_ds.ppi_edg_lvl = readl_relaxed(rdist_base + GICR_ICFGR0 + 4);
+	if (rdist_base) {
+		gic_data_ds.enabled_sgis = readl_relaxed(rdist_base + GICD_ISENABLER);
+		gic_data_ds.pending_sgis = readl_relaxed(rdist_base + GICD_ISPENDR);
+		/* Store edge level for PPIs by reading GICR_ICFGR1 */
+		gic_data_ds.ppi_edg_lvl = readl_relaxed(rdist_base + GICR_ICFGR0 + 4);
+	}
 
 	for (i = 0; i * 32 < GIC_LINE_NR; i++) {
 		gic_data_ds.enabled_irqs[i] = readl_relaxed(base + GICD_ISENABLER + i * 4);
@@ -67,7 +82,7 @@ static void gic_suspend_ds(void *data, struct gic_chip_data_v3 *gic_data)
 		gic_data_ds.irq_edg_lvl[i] = readl_relaxed(base + GICD_ICFGR + i * 4);
 }
 
-static void gic_resume_ds(struct gic_chip_data_v3 *gic_data)
+static void gic_resume_ds(void *gic_data)
 {
 	int i;
 	void __iomem *rdist_base = gic_data_rdist_sgi_base();
@@ -75,10 +90,12 @@ static void gic_resume_ds(struct gic_chip_data_v3 *gic_data)
 	pr_info("Re-initializing gic in hibernation restore\n");
 	gic_v3_dist_init();
 	gic_v3_cpu_init();
-	writel_relaxed(gic_data_ds.enabled_sgis, rdist_base + GICD_ISENABLER);
-	writel_relaxed(gic_data_ds.pending_sgis, rdist_base + GICD_ISPENDR);
-	/* Restore edge and level triggers for PPIs from GICR_ICFGR1 */
-	writel_relaxed(gic_data_ds.ppi_edg_lvl, rdist_base + GICR_ICFGR0 + 4);
+	if (rdist_base) {
+		writel_relaxed(gic_data_ds.enabled_sgis, rdist_base + GICD_ISENABLER);
+		writel_relaxed(gic_data_ds.pending_sgis, rdist_base + GICD_ISPENDR);
+		/* Restore edge and level triggers for PPIs from GICR_ICFGR1 */
+		writel_relaxed(gic_data_ds.ppi_edg_lvl, rdist_base + GICR_ICFGR0 + 4);
+	}
 	/* Restore edge and level triggers */
 	for (i = 2; i < GIC_LINE_NR / 16; i++)
 		writel_relaxed(gic_data_ds.irq_edg_lvl[i], base + GICD_ICFGR + i * 4);

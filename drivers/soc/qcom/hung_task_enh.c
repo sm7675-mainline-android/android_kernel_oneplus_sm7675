@@ -9,7 +9,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/syscore_ops.h>
-#include <linux/sched/walt.h>
 
 #include <trace/hooks/hung_task.h>
 
@@ -46,17 +45,33 @@ struct hung_task_enh_data {
 	struct ctl_table_header *ctl_table_hdr;
 };
 
+/*
+ * The vendor kernel keeps a WALT-allocated per-task block behind
+ * task_struct::android_vendor_data1.  The upstream 6.18 tree has no WALT, so
+ * the hung-task enhancement stores its single status byte directly in a
+ * vendor-data slot instead.  Slot 0 belongs to the MPAM game driver.
+ */
+#define HUNG_TASK_STATUS_SLOT 1
+
+static inline u8 hung_task_status_get(struct task_struct *p)
+{
+	return (u8)p->android_vendor_data1[HUNG_TASK_STATUS_SLOT];
+}
+
+static inline void hung_task_status_set(struct task_struct *p, u8 val)
+{
+	p->android_vendor_data1[HUNG_TASK_STATUS_SLOT] = (u64)val;
+}
+
 static struct hung_task_enh_data hung_task_enh;
 
 void qcom_before_check_tasks(void *ignore, struct task_struct *t, unsigned long timeout,
 							bool *need_check)
 {
-	struct walt_task_struct *wts = (struct walt_task_struct *) t->android_vendor_data1;
-
 	if ((hung_task_enh.global_detect_mode == HUNG_TASK_MODE_WHITELIST &&
-			wts->hung_detect_status != TASK_IN_WHITELIST) ||
+			hung_task_status_get(t) != TASK_IN_WHITELIST) ||
 			(hung_task_enh.global_detect_mode == HUNG_TASK_MODE_BLACKLIST &&
-			wts->hung_detect_status == TASK_IN_BLACKLIST)) {
+			hung_task_status_get(t) == TASK_IN_BLACKLIST)) {
 		*need_check = false;
 		return;
 	}
@@ -103,7 +118,6 @@ static int hung_task_handler(struct ctl_table *table, int write,
 {
 	int ret;
 	struct task_struct *task;
-	struct walt_task_struct *wts;
 	int pid_and_val[2] = {-1, -1};
 
 	struct ctl_table tmp = {
@@ -121,9 +135,8 @@ static int hung_task_handler(struct ctl_table *table, int write,
 			ret = -ENOENT;
 			goto unlock_mutex;
 		}
-		wts = (struct walt_task_struct *) task->android_vendor_data1;
 		pid_and_val[0] = hung_task_enh.read_pid;
-		pid_and_val[1] = wts->hung_detect_status;
+		pid_and_val[1] = hung_task_status_get(task);
 		ret = proc_dointvec(&tmp, write, buffer, lenp, ppos);
 		goto put_task;
 	}
@@ -143,14 +156,13 @@ static int hung_task_handler(struct ctl_table *table, int write,
 		goto unlock_mutex;
 	}
 
-	wts = (struct walt_task_struct *) task->android_vendor_data1;
 	if (pid_and_val[1] == 1) {
 		if (hung_task_enh.global_detect_mode == HUNG_TASK_MODE_WHITELIST)
-			wts->hung_detect_status = TASK_IN_WHITELIST;
+			hung_task_status_set(task, TASK_IN_WHITELIST);
 		else
-			wts->hung_detect_status = TASK_IN_BLACKLIST;
+			hung_task_status_set(task, TASK_IN_BLACKLIST);
 	} else {
-		wts->hung_detect_status = TASK_DEFAULT;
+		hung_task_status_set(task, TASK_DEFAULT);
 	}
 
 put_task:
@@ -205,16 +217,7 @@ struct ctl_table hung_task_table[] = {
 		.extra1		= SYSCTL_ONE,
 		.extra2		= SYSCTL_INT_MAX,
 	},
-	{ }
-};
-
-struct ctl_table hung_task_base_table[] = {
-	{
-		.procname	= "hung_task_enh",
-		.mode		= 0555,
-		.child		= hung_task_table,
-	},
-	{ }
+	/* register_sysctl() counts entries, so omit the legacy sentinel. */
 };
 
 static int __init hung_task_enh_init(void)
@@ -223,25 +226,25 @@ static int __init hung_task_enh_init(void)
 
 	hung_task_enh.max_iowait_task_cnt = DEFAULT_MAX_IOWAIT_TASK;
 
-	ret = register_trace_android_vh_check_uninterrupt_tasks(
+	ret = register_trace_android_vh_check_uninterruptible_tasks(
 						qcom_before_check_tasks, NULL);
 	if (ret)
 		return ret;
 
-	ret = register_trace_android_vh_check_uninterrupt_tasks_done(
+	ret = register_trace_android_vh_check_uninterruptible_tasks_dn(
 						qcom_check_tasks_done, NULL);
 	if (ret) {
-		unregister_trace_android_vh_check_uninterrupt_tasks(
+		unregister_trace_android_vh_check_uninterruptible_tasks(
 						qcom_before_check_tasks, NULL);
 		return ret;
 	}
 
-	hung_task_enh.ctl_table_hdr = register_sysctl_table(
-						hung_task_base_table);
+	hung_task_enh.ctl_table_hdr = register_sysctl("hung_task_enh",
+						hung_task_table);
 	if (!hung_task_enh.ctl_table_hdr) {
-		unregister_trace_android_vh_check_uninterrupt_tasks(
+		unregister_trace_android_vh_check_uninterruptible_tasks(
 						qcom_before_check_tasks, NULL);
-		unregister_trace_android_vh_check_uninterrupt_tasks_done(
+		unregister_trace_android_vh_check_uninterruptible_tasks_dn(
 						qcom_check_tasks_done, NULL);
 		return -ENOMEM;
 	}
@@ -253,9 +256,9 @@ late_initcall(hung_task_enh_init);
 static void __exit hung_task_enh_exit(void)
 {
 	unregister_sysctl_table(hung_task_enh.ctl_table_hdr);
-	unregister_trace_android_vh_check_uninterrupt_tasks(
+	unregister_trace_android_vh_check_uninterruptible_tasks(
 						qcom_before_check_tasks, NULL);
-	unregister_trace_android_vh_check_uninterrupt_tasks_done(
+	unregister_trace_android_vh_check_uninterruptible_tasks_dn(
 						qcom_check_tasks_done, NULL);
 }
 module_exit(hung_task_enh_exit);

@@ -46,7 +46,7 @@
 #include <asm/memory.h>
 
 #include <linux/sched/cputime.h>
-#include "../../../kernel/sched/sched.h"
+#include "kernel/sched/sched.h"
 #include <linux/sched/walt.h>
 
 #include <linux/kdebug.h>
@@ -65,7 +65,7 @@
 #endif
 #include "minidump_memory.h"
 #endif
-#include "../../../kernel/time/tick-internal.h"
+#include "kernel/time/tick-internal.h"
 
 #ifdef CONFIG_QCOM_DYN_MINIDUMP_STACK
 
@@ -811,7 +811,7 @@ static void md_dump_cgroup_state(char *status, struct sched_entity *se_p,
 		md_dump_task_info(task, status, curr);
 		return;
 	}
-	nr_running = my_q->nr_running;
+	nr_running = my_q->h_nr_queued;
 	md_dump_align();
 	seq_buf_printf(md_runq_seq_buf, "%s: %d process is grouping\n",
 				   status, nr_running);
@@ -851,8 +851,6 @@ static void md_dump_cfs_rq(struct cfs_rq *cfs, struct task_struct *curr)
 
 	md_dump_cgroup_state("curr", cfs->curr, curr);
 	md_dump_cgroup_state("next", cfs->next, curr);
-	md_dump_cgroup_state("last", cfs->last, curr);
-	md_dump_cgroup_state("skip", cfs->skip, curr);
 	md_rb_walk_cfs(rb_root_cached_p, curr);
 }
 
@@ -956,7 +954,7 @@ static void md_dump_runqueues(void)
 			       cpu, rq->nr_running, cpu_curr(cpu)->pid);
 		seq_buf_printf(md_runq_seq_buf,
 			       "CFS has %d process\n",
-			       cfs->nr_running);
+			       cfs->nr_queued);
 		md_dump_cfs_rq(cfs, cpu_curr(cpu));
 		seq_buf_printf(md_runq_seq_buf,
 			       "RT has %d process\n",
@@ -1411,14 +1409,13 @@ static int md_module_process(struct module *mod)
 	}
 
 	if (md_mod_info_seq_buf) {
-		base_addr = (unsigned long)mod->core_layout.base;
+		base_addr = (unsigned long)mod->mem[MOD_TEXT].base;
         seq_buf_printf(md_mod_info_seq_buf, "name: %s, base: %lx, nplt: %d",
 			mod->name, base_addr, mod->arch.core.plt_max_entries +
 			1 + NR_FTRACE_PLTS);
 		if (is_key_module) {
-			dump_start = base_addr +
-					mod->core_layout.ro_after_init_size;
-			dump_end = base_addr + mod->core_layout.size;
+			dump_start = (unsigned long)mod->mem[MOD_DATA].base;
+			dump_end = dump_start + mod->mem[MOD_DATA].size;
 			if (((dump_end - dump_start) / PAGE_SIZE) <
 				msm_minidump_get_available_region()) {
 				for (i = 0; i < mod->sect_attrs->nsections ; i++) {

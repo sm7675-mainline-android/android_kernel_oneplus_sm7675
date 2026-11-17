@@ -102,7 +102,7 @@ static void register_spinlock_bug_hook(struct platform_device *pdev)
 static inline void register_spinlock_bug_hook(struct platform_device *pdev) { }
 #endif
 
-#ifdef CONFIG_RANDOMIZE_BASE
+#if defined(CONFIG_RANDOMIZE_BASE) && !defined(MODULE)
 #define KASLR_OFFSET_MASK	0x00000000FFFFFFFF
 static void __iomem *map_prop_mem(const char *propname)
 {
@@ -128,9 +128,9 @@ static void store_kaslr_offset(void)
 		return;
 
 	__raw_writel(0xdead4ead, mem);
-	__raw_writel((kimage_vaddr - KIMAGE_VADDR) & KASLR_OFFSET_MASK,
+	__raw_writel((kaslr_offset()) & KASLR_OFFSET_MASK,
 		     mem + 4);
-	__raw_writel(((kimage_vaddr - KIMAGE_VADDR) >> 32) & KASLR_OFFSET_MASK,
+	__raw_writel(((kaslr_offset()) >> 32) & KASLR_OFFSET_MASK,
 		     mem + 8);
 
 	iounmap(mem);
@@ -144,14 +144,14 @@ static struct syscore_ops kaslr_offset_restore_syscore_ops = {
 
 #else
 static void store_kaslr_offset(void) {}
-#endif /* CONFIG_RANDOMIZE_BASE */
+#endif /* CONFIG_RANDOMIZE_BASE && !MODULE */
 
 static int cpu_vendor_hooks_driver_probe(struct platform_device *pdev)
 {
 	int ret;
 
 	store_kaslr_offset();
-#if defined(CONFIG_HIBERNATION) && defined(CONFIG_RANDOMIZE_BASE)
+#if defined(CONFIG_HIBERNATION) && defined(CONFIG_RANDOMIZE_BASE) && !defined(MODULE)
 	register_syscore_ops(&kaslr_offset_restore_syscore_ops);
 #endif
 
@@ -209,7 +209,7 @@ static int __init qcom_vendor_hook_driver_init(void)
 {
 	return platform_driver_register(&cpu_vendor_hooks_driver);
 }
-#if IS_MODULE(CONFIG_QCOM_CPU_VENDOR_HOOKS)
+#ifdef MODULE
 module_init(qcom_vendor_hook_driver_init);
 #else
 pure_initcall(qcom_vendor_hook_driver_init);

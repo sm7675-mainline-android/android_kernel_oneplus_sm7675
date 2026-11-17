@@ -259,6 +259,7 @@ static int msm_hang_detect_probe(struct platform_device *pdev)
 	int ret, cluster_cpu_count = 0;
 	int cpu, num_cpu, entry, num_chd_entry;
 	const char *name;
+	struct device *cpu_root;
 	u32 fw_cluster_id;
 	struct of_phandle_args chd_entry;
 
@@ -332,9 +333,13 @@ static int msm_hang_detect_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
+	cpu_root = bus_get_dev_root(&cpu_subsys);
+	if (!cpu_root)
+		return -ENODEV;
+
 	ret = kobject_init_and_add(&hang_det->kobj, &core_ktype,
-			&cpu_subsys.dev_root->kobj, "%s_%s",
-			"hang_detect", name);
+			&cpu_root->kobj, "%s_%s", "hang_detect", name);
+	put_device(cpu_root);
 	if (ret) {
 		pr_err("%s: Error in creation kobject_add\n", __func__);
 		goto out_put_kobj;

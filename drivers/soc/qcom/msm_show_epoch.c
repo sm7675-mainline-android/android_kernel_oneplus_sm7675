@@ -4,6 +4,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/init.h>
 #include <trace/hooks/epoch.h>
 
 static u64 suspend_ns;
@@ -34,7 +35,7 @@ static int __init msm_show_epoch_init(void)
 	return 0;
 }
 
-#if IS_MODULE(CONFIG_SHOW_SUSPEND_EPOCH)
+#if IS_MODULE(CONFIG_SHOW_SUSPEND_EPOCH) || defined(MODULE)
 module_init(msm_show_epoch_init);
 #else
 pure_initcall(msm_show_epoch_init);

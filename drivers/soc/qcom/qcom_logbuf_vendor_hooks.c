@@ -20,7 +20,7 @@
 #include "../../../kernel/printk/printk_ringbuffer.h"
 #include "debug_symbol.h"
 
-void register_log_minidump(struct printk_ringbuffer *prb)
+static void register_log_minidump(struct printk_ringbuffer *prb)
 {
 	struct prb_desc_ring descring;
 	struct prb_data_ring textdata_ring;
@@ -67,18 +67,20 @@ void register_log_minidump(struct printk_ringbuffer *prb)
 static int logbuf_vh_driver_probe(struct platform_device *pdev)
 {
 	struct printk_ringbuffer *prb = NULL;
+	unsigned long prb_addr;
 
 	if (!debug_symbol_available())
 		return -EPROBE_DEFER;
 
-	prb = *(struct printk_ringbuffer **)DEBUG_SYMBOL_LOOKUP(prb);
+	prb_addr = (unsigned long)DEBUG_SYMBOL_LOOKUP(prb);
+	if (!prb_addr)
+		return -ENOENT;
+
+	prb = *(struct printk_ringbuffer **)prb_addr;
+	if (!prb)
+		return -EPROBE_DEFER;
 	register_log_minidump(prb);
 
-	return 0;
-}
-
-static int logbuf_vh_driver_remove(struct platform_device *pdev)
-{
 	return 0;
 }
 
@@ -94,7 +96,6 @@ static struct platform_driver logbuf_vh_driver = {
 		.of_match_table = logbuf_vh_of_match,
 	},
 	.probe = logbuf_vh_driver_probe,
-	.remove = logbuf_vh_driver_remove,
 };
 module_platform_driver(logbuf_vh_driver);
 

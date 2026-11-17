@@ -214,7 +214,9 @@ err:
 	mutex_unlock(&drvdata->mutex);
 }
 
-static int remote_etm_trace_id(struct coresight_device *csdev)
+static int remote_etm_trace_id(struct coresight_device *csdev,
+			       enum cs_mode mode,
+			       struct coresight_device *sink)
 {
 	struct remote_etm_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
 
@@ -222,7 +224,6 @@ static int remote_etm_trace_id(struct coresight_device *csdev)
 }
 
 static const struct coresight_ops_source remote_etm_source_ops = {
-	.trace_id	= remote_etm_trace_id,
 	.enable		= remote_etm_enable,
 	.disable	= remote_etm_disable,
 };
@@ -332,6 +333,7 @@ err:
 EXPORT_SYMBOL(remote_etm_etr_assign);
 
 static const struct coresight_ops remote_cs_ops = {
+	.trace_id	= remote_etm_trace_id,
 	.source_ops	= &remote_etm_source_ops,
 };
 
@@ -397,7 +399,7 @@ static int remote_etm_probe(struct platform_device *pdev)
 	if (drvdata->inst_id >= sizeof(int)*BITS_PER_BYTE)
 		dev_err(dev, "inst_id greater than boot_enable bit mask\n");
 	else if (boot_enable & BIT(drvdata->inst_id))
-		coresight_enable(drvdata->csdev);
+		coresight_enable_sysfs(drvdata->csdev);
 
 	list_add_tail(&drvdata->link, &remote_etm_list);
 
@@ -430,7 +432,7 @@ static int remote_etm_suspend(struct device *dev)
 	struct remote_etm_drvdata *drvdata = dev_get_drvdata(dev);
 
 	if (pm_suspend_via_firmware())
-		coresight_disable(drvdata->csdev);
+		coresight_disable_sysfs(drvdata->csdev);
 
 	return 0;
 }
@@ -441,7 +443,7 @@ static int remote_etm_freeze(struct device *dev)
 {
 	struct remote_etm_drvdata *drvdata = dev_get_drvdata(dev);
 
-	coresight_disable(drvdata->csdev);
+	coresight_disable_sysfs(drvdata->csdev);
 
 	return 0;
 }

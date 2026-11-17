@@ -13,6 +13,13 @@
 #include <linux/coresight.h>
 #include <linux/pm_runtime.h>
 
+/* 6.18's <linux/coresight.h> already defines enum cs_mode (upstream gained a
+ * CS_MODE_SEC member for the secure-mode path), so the vendor copy here is a
+ * duplicate definition. */
+#ifndef CS_MODE_SEC
+#define CS_MODE_SEC		3
+#endif
+
 /*
  * Coresight management registers (0xf00-0xfcc)
  * 0xfa0 - 0xfa4: Management	registers in PFTv1.0
@@ -81,13 +88,6 @@ enum etm_addr_type {
 	ETM_ADDR_TYPE_RANGE,
 	ETM_ADDR_TYPE_START,
 	ETM_ADDR_TYPE_STOP,
-};
-
-enum cs_mode {
-	CS_MODE_DISABLED,
-	CS_MODE_SYSFS,
-	CS_MODE_PERF,
-	CS_MODE_SEC,
 };
 
 /**
