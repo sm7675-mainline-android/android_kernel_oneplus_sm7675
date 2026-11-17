@@ -679,6 +679,7 @@ static int at8031_register_regulators(struct phy_device *phydev)
 static int at803x_sfp_insert(void *upstream, const struct sfp_eeprom_id *id)
 {
 	struct phy_device *phydev = upstream;
+	const struct sfp_module_caps *caps;
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(phy_support);
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(sfp_support);
 	DECLARE_PHY_INTERFACE_MASK(interfaces);
@@ -691,8 +692,14 @@ static int at803x_sfp_insert(void *upstream, const struct sfp_eeprom_id *id)
 	phylink_set(phy_support, Pause);
 	phylink_set(phy_support, Asym_Pause);
 
-	linkmode_zero(sfp_support);
-	sfp_parse_support(phydev->sfp_bus, id, sfp_support, interfaces);
+	/* 6.18 parses the EEPROM once in sfp_module_insert() and exposes the
+	 * resulting capabilities through the SFP bus.
+	 */
+	caps = sfp_get_module_caps(phydev->sfp_bus);
+	if (!caps)
+		return -EOPNOTSUPP;
+	phy_interface_copy(interfaces, caps->interfaces);
+	linkmode_copy(sfp_support, caps->link_modes);
 	/* Some modules support 10G modes as well as others we support.
 	 * Mask out non-supported modes so the correct interface is picked.
 	 */
@@ -1235,10 +1242,11 @@ static int at803x_read_specific_status(struct phy_device *phydev)
 static int at803x_read_status(struct phy_device *phydev)
 {
 	struct at803x_priv *priv = phydev->priv;
+	bool changed;
 	int err, old_link = phydev->link;
 
 	if (priv->is_1000basex)
-		return genphy_c37_read_status(phydev);
+		return genphy_c37_read_status(phydev, &changed);
 
 	/* Update the link, but return if there was an error */
 	err = genphy_update_link(phydev);
@@ -1742,7 +1750,7 @@ static int qca808x_phy_fast_retrain_config(struct phy_device *phydev)
 
 static int qca808x_phy_ms_random_seed_set(struct phy_device *phydev)
 {
-	u16 seed_value = prandom_u32_max(QCA808X_MASTER_SLAVE_SEED_RANGE);
+	u16 seed_value = get_random_u32_below(QCA808X_MASTER_SLAVE_SEED_RANGE);
 
 	return at803x_debug_reg_mask(phydev, QCA808X_PHY_DEBUG_LOCAL_SEED,
 			QCA808X_MASTER_SLAVE_SEED_CFG,
