@@ -3166,6 +3166,15 @@ static int gcc_cliffs_probe(struct platform_device *pdev)
 	regmap_update_bits(regmap, 0x32004, BIT(0), BIT(0));
 	regmap_update_bits(regmap, 0x32030, BIT(0), BIT(0));
 
+	ret = regmap_update_bits(regmap, gcc_ufs_phy_axi_clk.halt_reg,
+				 CBCR_FORCE_MEM_CORE_ON, CBCR_FORCE_MEM_CORE_ON);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "UFS AXI memory retention failed\n");
+	ret = regmap_update_bits(regmap, gcc_ufs_phy_ice_core_clk.halt_reg,
+				 CBCR_FORCE_MEM_CORE_ON, CBCR_FORCE_MEM_CORE_ON);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "UFS ICE memory retention failed\n");
+
 	ret = qcom_cc_really_probe(pdev, &gcc_cliffs_desc, regmap);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to register GCC clocks\n");

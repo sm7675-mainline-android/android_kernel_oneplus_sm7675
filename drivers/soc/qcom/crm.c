@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
@@ -372,6 +373,7 @@ struct crm_drv_top {
 };
 
 static LIST_HEAD(crm_dev_list);
+static DEFINE_MUTEX(crm_dev_list_lock);
 
 static inline u32 get_crm_phy_addr(void __iomem *base)
 {
@@ -1144,13 +1146,18 @@ EXPORT_SYMBOL_GPL(crm_write_bw_vote);
 const struct device *crm_get_device(const char *name)
 {
 	struct crm_drv_top *crm;
+	const struct device *dev = ERR_PTR(-ENODEV);
 
+	mutex_lock(&crm_dev_list_lock);
 	list_for_each_entry(crm, &crm_dev_list, list) {
-		if (!strcmp(name, crm->name))
-			return crm->dev;
+		if (!strcmp(name, crm->name)) {
+			dev = crm->dev;
+			break;
+		}
 	}
+	mutex_unlock(&crm_dev_list_lock);
 
-	return ERR_PTR(-ENODEV);
+	return dev;
 }
 EXPORT_SYMBOL_GPL(crm_get_device);
 
@@ -1483,7 +1490,7 @@ static int crm_probe(struct platform_device *pdev)
 
 	crm_en = readl_relaxed(crm->base + CRM_ENABLE);
 	if (!crm_en)
-		return -EINVAL;
+		return dev_err_probe(&pdev->dev, -EINVAL, "CRM is disabled\n");
 
 	ret = crm_probe_drvs(crm, dn);
 	if (ret)
@@ -1496,7 +1503,9 @@ static int crm_probe(struct platform_device *pdev)
 	crm_set_chn_behave(crm);
 
 	INIT_LIST_HEAD(&crm->list);
+	mutex_lock(&crm_dev_list_lock);
 	list_add_tail(&crm->list, &crm_dev_list);
+	mutex_unlock(&crm_dev_list_lock);
 	dev_set_drvdata(&pdev->dev, crm);
 
 	return ret;

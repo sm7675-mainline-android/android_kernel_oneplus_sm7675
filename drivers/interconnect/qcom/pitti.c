@@ -1369,6 +1369,9 @@ static int qnoc_probe(struct platform_device *pdev)
 	if (!data)
 		return -ENOMEM;
 
+	/* Initialize the counted array bound before populating nodes. */
+	data->num_nodes = num_nodes;
+
 	qp->bus_clks = devm_kmemdup(dev, bus_clocks, sizeof(bus_clocks),
 				    GFP_KERNEL);
 	if (!qp->bus_clks)
@@ -1449,7 +1452,6 @@ static int qnoc_probe(struct platform_device *pdev)
 
 		data->nodes[i] = node;
 	}
-	data->num_nodes = num_nodes;
 
 	clk_bulk_disable_unprepare(qp->num_qos_clks, qp->qos_clks);
 

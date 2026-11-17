@@ -142,7 +142,7 @@ int qcom_icc_set(struct icc_node *src, struct icc_node *dst)
 		if (clk_rate > 0) {
 			ret = clk_set_rate(qn->clk, clk_rate);
 			if (ret)
-				dev_warn(qp->dev, "Failed to set %s rate to %d for %s\n",
+				dev_warn(qp->dev, "Failed to set %s rate to %lld for %s\n",
 					 qn->clk_name, clk_rate, qn->name);
 
 			if (qn->toggle_clk && !qn->clk_enabled) {
@@ -441,6 +441,9 @@ int qcom_icc_rpmh_probe(struct platform_device *pdev)
 	if (!data)
 		return -ENOMEM;
 
+	/* Set the counted array bound before writing any node pointers. */
+	data->num_nodes = num_nodes;
+
 	qp->stub = of_property_read_bool(pdev->dev.of_node, "qcom,stub");
 	qp->skip_qos = of_property_read_bool(pdev->dev.of_node, "qcom,skip-qos");
 
@@ -472,25 +475,32 @@ int qcom_icc_rpmh_probe(struct platform_device *pdev)
 
 		ret = qcom_icc_init_disabled_parts(qp);
 		if (ret)
-			return ret;
+			return dev_err_probe(qp->dev, ret,
+					     "Failed to initialize disabled parts\n");
 
 		for (i = 0; i < qp->num_voters; i++) {
 			if (desc->voters[i] && !is_voter_disabled(desc->voters[i])) {
 				qp->voters[i] = of_bcm_voter_get(qp->dev, desc->voters[i]);
-				if (IS_ERR(qp->voters[i]))
-					return PTR_ERR(qp->voters[i]);
+				if (IS_ERR(qp->voters[i])) {
+					/* Preserve probe deferral until the BCM voter is ready. */
+					return dev_err_probe(qp->dev, PTR_ERR(qp->voters[i]),
+							     "Failed to get BCM voter %s\n",
+							     desc->voters[i]);
+				}
 			}
 		}
 	}
 
 	qp->regmap = qcom_icc_rpmh_map(pdev, desc);
 	if (IS_ERR(qp->regmap))
-		return PTR_ERR(qp->regmap);
+		return dev_err_probe(qp->dev, PTR_ERR(qp->regmap),
+				     "Failed to map registers\n");
 
 
 	qp->num_clks = devm_clk_bulk_get_all(qp->dev, &qp->clks);
 	if (qp->num_clks < 0)
-		return qp->num_clks;
+		return dev_err_probe(qp->dev, qp->num_clks,
+				     "Failed to get clocks\n");
 
 	for (i = 0; i < qp->num_bcms; i++)
 		qcom_icc_bcm_init(qp, qp->bcms[i], dev);
@@ -512,9 +522,8 @@ int qcom_icc_rpmh_probe(struct platform_device *pdev)
 			qn->clk = devm_clk_get(qp->dev, qn->clk_name);
 			if (IS_ERR(qn->clk)) {
 				ret = PTR_ERR(qn->clk);
-				if (ret != -EPROBE_DEFER)
-					dev_err(qp->dev, "failed to get %s, err:(%d)\n",
-						qn->clk_name, ret);
+				dev_err_probe(qp->dev, ret, "Failed to get node %d clock %s\n",
+					      qn->id, qn->clk_name);
 				goto err_remove_nodes;
 			}
 		}
@@ -529,8 +538,6 @@ int qcom_icc_rpmh_probe(struct platform_device *pdev)
 		data->nodes[i] = node;
 	}
 
-	data->num_nodes = num_nodes;
-
 	if (!qp->skip_qos) {
 		ret = qcom_icc_rpmh_configure_qos(qp);
 		if (ret)
@@ -538,8 +545,10 @@ int qcom_icc_rpmh_probe(struct platform_device *pdev)
 	}
 
 	ret = icc_provider_register(provider);
-	if (ret)
+	if (ret) {
+		dev_err_probe(qp->dev, ret, "Failed to register provider\n");
 		goto err_remove_nodes;
+	}
 
 	platform_set_drvdata(pdev, qp);
 

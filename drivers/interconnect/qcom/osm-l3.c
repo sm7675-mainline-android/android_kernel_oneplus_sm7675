@@ -298,6 +298,9 @@ static int qcom_osm_l3_probe(struct platform_device *pdev)
 	if (!data)
 		return -ENOMEM;
 
+	/* Initialize the counted array bound before populating nodes. */
+	data->num_nodes = num_nodes;
+
 	provider = &qp->provider;
 	provider->dev = &pdev->dev;
 	provider->set = qcom_osm_l3_set;
@@ -326,7 +329,6 @@ static int qcom_osm_l3_probe(struct platform_device *pdev)
 
 		data->nodes[i] = node;
 	}
-	data->num_nodes = num_nodes;
 
 	ret = icc_provider_register(provider);
 	if (ret)

@@ -350,6 +350,7 @@ static int clk_debug_mux_init(struct clk_hw *hw)
 }
 
 const struct clk_ops clk_debug_mux_ops = {
+	.determine_rate = __clk_mux_determine_rate,
 	.get_parent = clk_debug_mux_get_parent,
 	.set_parent = clk_debug_mux_set_parent,
 	.debug_init = clk_debug_measure_add,

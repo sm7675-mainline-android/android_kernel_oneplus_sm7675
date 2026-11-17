@@ -248,6 +248,8 @@ struct bcm_voter *of_bcm_voter_get(struct device *dev, const char *name)
 	}
 
 	node = of_parse_phandle(np, "qcom,bcm-voters", idx);
+	if (!node)
+		return voter;
 
 	mutex_lock(&bcm_voter_lock);
 	list_for_each_entry(temp, &bcm_voters, voter_node) {
@@ -627,7 +629,7 @@ static int qcom_icc_bcm_voter_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int qcom_icc_bcm_voter_remove(struct platform_device *pdev)
+static void qcom_icc_bcm_voter_remove(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct bcm_voter *voter, *temp;
@@ -640,8 +642,6 @@ static int qcom_icc_bcm_voter_remove(struct platform_device *pdev)
 		}
 	}
 	mutex_unlock(&bcm_voter_lock);
-
-	return 0;
 }
 
 static const struct of_device_id bcm_voter_of_match[] = {

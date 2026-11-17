@@ -1172,24 +1172,21 @@ static int clk_debug_cliffs_probe(struct platform_device *pdev)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(mux_list); i++) {
+		if (IS_ERR_OR_NULL(mux_list[i].mux->regmap))
+			continue;
 		ret = devm_clk_register_debug_mux(&pdev->dev, mux_list[i].mux);
-		if (ret) {
-			dev_err(&pdev->dev, "Unable to register mux clk %s, err:(%d)\n",
-				qcom_clk_hw_get_name(&mux_list[i].mux->hw),
-				ret);
-			return ret;
-		}
+		if (ret)
+			return dev_err_probe(&pdev->dev, ret,
+					     "Unable to register debug mux %s\n",
+					     clk_hw_get_name(&mux_list[i].mux->hw));
 	}
-
 	ret = clk_debug_measure_register(&gcc_debug_mux.hw);
-	if (ret) {
-		dev_err(&pdev->dev, "Could not register Measure clocks\n");
-		return ret;
-	}
-
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret,
+				     "Could not register measure clocks\n");
 	dev_info(&pdev->dev, "Registered debug measure clocks\n");
 
-	return ret;
+	return 0;
 }
 
 static struct platform_driver clk_debug_driver = {

@@ -38,7 +38,8 @@ static ssize_t get_write_op(struct file *file, char const __user *buf,
 	if (ret)
 		return ret;
 
-	path = icc_get(&icc_pdev->dev, src_port, dst_port);
+	/* 6.18 removed icc_get(); debugfs test uses the by-index lookup instead */
+	path = of_icc_get_by_index(&icc_pdev->dev, src_port);
 	if (IS_ERR(path))
 		return PTR_ERR(path);
 
