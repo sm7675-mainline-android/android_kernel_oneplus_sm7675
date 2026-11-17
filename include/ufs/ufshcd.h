@@ -20,10 +20,11 @@
 #include <linux/pm_runtime.h>
 #include <linux/dma-direction.h>
 #include <scsi/scsi_device.h>
-#include <ufs/unipro.h>
-#include <ufs/ufs.h>
-#include <ufs/ufs_quirks.h>
-#include <ufs/ufshci.h>
+#include <scsi/scsi_host.h>
+#include "unipro.h"
+#include "ufs.h"
+#include "ufs_quirks.h"
+#include "ufshci.h"
 
 #define UFSHCD "ufshcd"
 

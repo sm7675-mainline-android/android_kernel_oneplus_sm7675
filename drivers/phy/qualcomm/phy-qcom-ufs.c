@@ -434,6 +434,10 @@ static int ufs_qcom_phy_cfg_vreg(struct device *dev,
 	int min_uV;
 	int uA_load;
 
+	/* Optional supplies may be absent, as in the enable/disable paths. */
+	if (!reg)
+		return 0;
+
 	if (regulator_count_voltages(reg) > 0) {
 		min_uV = on ? vreg->min_uV : 0;
 		ret = regulator_set_voltage(reg, min_uV, vreg->max_uV);
@@ -465,7 +469,7 @@ static int ufs_qcom_phy_enable_vreg(struct device *dev,
 {
 	int ret = 0;
 
-	if (!vreg || vreg->enabled)
+	if (!vreg || vreg->enabled || !vreg->reg)
 		goto out;
 
 	ret = ufs_qcom_phy_cfg_vreg(dev, vreg, true);

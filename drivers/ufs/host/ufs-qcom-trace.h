@@ -9,7 +9,20 @@
 #if !defined(_TRACE_UFS_QCOM_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _TRACE_UFS_QCOM_H
 
+#include <ufs/ufs.h>
 #include <linux/tracepoint.h>
+
+#ifndef UFS_CMD_SEND
+#define UFS_CMD_SEND 0
+#define UFS_CMD_COMP 1
+#define UFS_DEV_COMP 2
+#define UFS_QUERY_SEND 3
+#define UFS_QUERY_COMP 4
+#define UFS_QUERY_ERR 5
+#define UFS_TM_SEND 6
+#define UFS_TM_COMP 7
+#define UFS_TM_ERR 8
+#endif
 
 #define str_opcode(opcode)						\
 	__print_symbolic(opcode,					\
@@ -90,7 +103,7 @@ TRACE_EVENT(ufs_qcom_pwr_change_notify,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->status = status;
 		__entry->gear_rx = gear_rx;
 		__entry->pwr_rx = pwr_rx;
@@ -123,7 +136,7 @@ TRACE_EVENT(ufs_qcom_command,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->cmd_t = cmd_t;
 		__entry->opcode = opcode;
 		__entry->tag = tag;
@@ -159,7 +172,7 @@ TRACE_EVENT(ufs_qcom_uic,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->cmd_t = cmd_t;
 		__entry->cmd = cmd;
 		__entry->arg1 = arg1;
@@ -190,7 +203,7 @@ TRACE_EVENT(ufs_qcom_hook_check_int_errors,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->err = err;
 		__entry->uic_err = uic_err;
 	),
@@ -213,7 +226,7 @@ TRACE_EVENT(ufs_qcom_shutdown,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 	),
 
 	TP_printk(
@@ -235,7 +248,7 @@ DECLARE_EVENT_CLASS(ufs_qcom_clk_template,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->status = status;
 		__entry->on = on;
 		__entry->err = err;
@@ -267,7 +280,7 @@ DECLARE_EVENT_CLASS(ufs_qcom_noify_template,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->status = status;
 		__entry->err = err;
 	),
@@ -305,7 +318,7 @@ DECLARE_EVENT_CLASS(ufs_qcom_pm_template,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->pm_op = pm_op;
 		__entry->rpm_lvl = rpm_lvl;
 		__entry->spm_lvl = spm_lvl;

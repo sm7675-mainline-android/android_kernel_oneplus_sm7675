@@ -119,6 +119,11 @@ int ufs_qcom_phy_qmp_v4_set_mode(struct phy *generic_phy,
 	if (mode > 0)
 		phy_common->mode = mode;
 
+	/* Map the upstream high-gear encoding to the vendor PHY submode. */
+	if (submode > UFS_QCOM_PHY_SUBMODE_G5)
+		submode = (submode >= 4) ? UFS_QCOM_PHY_SUBMODE_G5
+					 : UFS_QCOM_PHY_SUBMODE_G4;
+
 	phy_common->submode = submode;
 
 	return 0;

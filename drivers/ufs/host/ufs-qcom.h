@@ -6,6 +6,8 @@
 #ifndef UFS_QCOM_H_
 #define UFS_QCOM_H_
 
+#include <linux/msi.h>
+
 #include <linux/reset-controller.h>
 #include <linux/reset.h>
 #include <linux/phy/phy.h>
@@ -813,32 +815,6 @@ static inline bool is_shared_ice_supported(struct ufs_qcom_host *host)
 	return !!(host->caps & UFS_QCOM_CAP_SHARED_ICE);
 }
 
-/**
- * ufshcd_dme_rmw - get modify set a dme attribute
- * @hba - per adapter instance
- * @mask - mask to apply on read value
- * @val - actual value to write
- * @attr - dme attribute
- */
-static inline int ufshcd_dme_rmw(struct ufs_hba *hba, u32 mask,
-				 u32 val, u32 attr)
-{
-	u32 cfg = 0;
-	int err = 0;
-
-	err = ufshcd_dme_get(hba, UIC_ARG_MIB(attr), &cfg);
-	if (err)
-		goto out;
-
-	cfg &= ~mask;
-	cfg |= (val & mask);
-
-	err = ufshcd_dme_set(hba, UIC_ARG_MIB(attr), cfg);
-
-out:
-	return err;
-}
-
 /*
  *  IOCTL opcode for ufs queries has the following opcode after
  *  SCSI_IOCTL_GET_PCI
@@ -939,13 +915,12 @@ static inline void ufs_qcom_ice_debug(struct ufs_qcom_host *host)
 
 static inline void ufs_qcom_msi_lock_descs(struct ufs_hba *hba)
 {
-	mutex_lock(&hba->dev->msi.data->mutex);
+	__msi_lock_descs(hba->dev);
 }
 
 static inline void ufs_qcom_msi_unlock_descs(struct ufs_hba *hba)
 {
-	hba->dev->msi.data->__iter_idx = MSI_MAX_INDEX;
-	mutex_unlock(&hba->dev->msi.data->mutex);
+	__msi_unlock_descs(hba->dev);
 }
 
 #endif /* UFS_QCOM_H_ */
