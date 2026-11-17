@@ -39,7 +39,7 @@ static int ese_set_power(struct ese_info *ese, unsigned long arg)
 static int ese_spi_clk_control(struct ese_info *ese, unsigned long arg)
 {
     int ret = SUCCESS;
-    struct mtk_spi *mt_spi = spi_master_get_devdata(ese->client->master);
+    struct mtk_spi *mt_spi = spi_controller_get_devdata(ese->client->controller);
 
     TMS_DEBUG("arg = %lu\n", arg);
 
@@ -262,7 +262,7 @@ static int ese_device_probe(struct spi_device *client)
     TMS_INFO("Enter\n");
 
     TMS_DEBUG("chip select = %d , bus number = %d \n",
-              client->chip_select, client->master->bus_num);
+              client->chip_select, client->controller->bus_num);
     /* step1 : alloc ese_info */
     ese = ese_data_alloc(&client->dev, ese);
 

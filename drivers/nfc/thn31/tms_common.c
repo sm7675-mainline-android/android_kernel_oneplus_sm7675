@@ -164,7 +164,7 @@ static int tms_common_probe(void)
 
     /* step4 : tms class register */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6,3,0)
-    tms.class = class_create(THIS_MODULE, DEVICES_CLASS_NAME);
+    tms.class = class_create(DEVICES_CLASS_NAME);
 #else
     tms.class = class_create(DEVICES_CLASS_NAME);
 #endif

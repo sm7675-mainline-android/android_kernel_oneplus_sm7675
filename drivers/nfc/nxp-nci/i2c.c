@@ -330,6 +330,8 @@ MODULE_DEVICE_TABLE(i2c, nxp_nci_i2c_id_table);
 
 static const struct of_device_id of_nxp_nci_i2c_match[] = {
 	{ .compatible = "nxp,nxp-nci-i2c", },
+	/* Qualcomm DT names the same NXP NCI frontend "qcom,sn-nci". */
+	{ .compatible = "qcom,sn-nci", },
 	{}
 };
 MODULE_DEVICE_TABLE(of, of_nxp_nci_i2c_match);
