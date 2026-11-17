@@ -22,6 +22,11 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/suspend.h>
 
+#define spi_master spi_controller
+#define spi_master_get_devdata spi_controller_get_devdata
+#define spi_master_put spi_controller_put
+#define spi_register_master spi_register_controller
+#define spi_unregister_master spi_unregister_controller
 #define SPI_NUM_CHIPSELECT	(4)
 /* modify timeout to 2s for oplus_consumer_ir spi mode */
 //#define SPI_XFER_TIMEOUT_MS	(250)
@@ -595,7 +600,7 @@ static int setup_fifo_params(struct spi_device *spi_slv,
 		cpha |= CPHA;
 
 	if (spi_slv->mode & SPI_CS_HIGH)
-		demux_output_inv |= BIT(spi_slv->chip_select);
+		demux_output_inv |= BIT(spi_get_chipselect(spi_slv, 0));
 
 	if (spi_slv->controller_data) {
 		u32 cs_clk_delay = 0;
@@ -613,7 +618,7 @@ static int setup_fifo_params(struct spi_device *spi_slv,
 		(inter_words_delay | cs_clk_delay);
 	}
 
-	demux_sel = spi_slv->chip_select;
+	demux_sel = spi_get_chipselect(spi_slv, 0);
 	mas->cur_speed_hz = spi_slv->max_speed_hz;
 	mas->cur_word_len = spi_slv->bits_per_word;
 
@@ -1149,7 +1154,7 @@ static int setup_gsi_xfer(struct spi_transfer *xfer,
 		rx_nent++;
 	}
 
-	cs |= spi_slv->chip_select;
+	cs |= spi_get_chipselect(spi_slv, 0);
 	if (!xfer->cs_change) {
 		if (!list_is_last(&xfer->transfer_list,
 					&spi->cur_msg->transfers))
@@ -2487,7 +2492,7 @@ static int spi_geni_probe(struct platform_device *pdev)
 	}
 
 	if (slave_en)
-		spi->slave_abort = spi_slv_abort;
+		spi->target_abort = spi_slv_abort;
 
 	pr_info("boot_kpi: M - DRIVER GENI_SPI Init\n");
 

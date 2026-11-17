@@ -558,7 +558,7 @@ static void eud_uart_rx(struct eud_chip *chip)
 static void eud_uart_tx(struct eud_chip *chip)
 {
 	struct uart_port *port = &chip->port;
-	struct circ_buf *xmit = &port->state->xmit;
+	struct kfifo *xmit = &port->state->port.xmit_fifo;
 	unsigned int len;
 	u32 reg;
 
@@ -570,14 +570,17 @@ static void eud_uart_tx(struct eud_chip *chip)
 	}
 	/* Write to Tx Len & Data registers */
 	spin_lock(&port->lock);
-	len = uart_circ_chars_pending(xmit);
+	len = kfifo_len(xmit);
 	if (len > 0) {
+		unsigned char ch;
+
 		if (len > port->fifosize)
 			len = port->fifosize;
 		while (len--) {
-			writel_relaxed(xmit->buf[xmit->tail],
+			if (kfifo_out(xmit, &ch, 1) != 1)
+				break;
+			writel_relaxed(ch,
 			       port->membase + EUD_REG_COM_TX_DAT);
-			xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
 			port->icount.tx++;
 		}
 	}
