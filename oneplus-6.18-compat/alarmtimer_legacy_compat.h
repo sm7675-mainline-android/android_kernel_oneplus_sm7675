@@ -1,0 +1,11 @@
+#ifndef _ALARMTIMER_LEGACY_COMPAT_H
+#define _ALARMTIMER_LEGACY_COMPAT_H
+
+#ifndef ALARMTIMER_NORESTART
+enum alarmtimer_restart {
+	ALARMTIMER_NORESTART = 0,
+	ALARMTIMER_RESTART = 1,
+};
+#endif
+
+#endif
