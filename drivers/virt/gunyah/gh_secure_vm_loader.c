@@ -188,7 +188,7 @@ static int gh_vm_loader_sec_load(struct gh_sec_vm_dev *vm_dev,
 		return ret;
 	}
 
-	metadata = qcom_mdt_read_metadata(dev, fw, fw_name, &metadata_size, false, NULL);
+	metadata = qcom_mdt_read_metadata(dev, fw, fw_name, &metadata_size);
 	if (IS_ERR(metadata)) {
 		release_firmware(fw);
 		return PTR_ERR(metadata);
@@ -200,7 +200,7 @@ static int gh_vm_loader_sec_load(struct gh_sec_vm_dev *vm_dev,
 		goto release_fw;
 	}
 
-	ret = qcom_mdt_load_no_init(dev, fw, fw_name, vm_dev->pas_id, vm_dev->fw_virt,
+	ret = qcom_mdt_load_no_init(dev, fw, fw_name, vm_dev->fw_virt,
 				vm_dev->fw_phys, vm_dev->fw_size, NULL);
 	if (ret) {
 		dev_err(dev, "Failed to load fw \"%s\": %d\n", fw_name, ret);

@@ -207,8 +207,8 @@ static int gh_tlmm_vm_populate_vm_info(struct platform_device *dev, struct gh_tl
 	}
 
 	vm_info->vm_name = GH_TRUSTED_VM;
-	num_regs = of_gpio_named_count(np,
-			"tlmm-vm-gpio-list");
+	num_regs = of_count_phandle_with_args(np,
+			"tlmm-vm-gpio-list", "#gpio-cells");
 	if (num_regs < 0) {
 		dev_err(gh_tlmm_dev, "Invalid number of gpios specified\n");
 		rc = -EINVAL;

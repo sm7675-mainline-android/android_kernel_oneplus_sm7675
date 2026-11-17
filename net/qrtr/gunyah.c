@@ -377,17 +377,40 @@ static int qrtr_gunyah_send(struct qrtr_endpoint *ep, struct sk_buff *skb)
 	return (rc < 0) ? rc : 0;
 }
 
+static int qrtr_gunyah_pkt_size(const __le32 *header)
+{
+	const u8 *bytes = (const u8 *)header;
+	u32 payload;
+	unsigned int header_len;
+
+	switch (bytes[0]) {
+	case 1:
+		header_len = 32;
+		payload = le32_to_cpu(header[5]);
+		break;
+	case 3:
+		header_len = 16 + bytes[3];
+		payload = le32_to_cpu(header[1]);
+		break;
+	default:
+		return -EINVAL;
+	}
+	if (payload > MAX_PKT_SZ || ALIGN(payload, 4) > MAX_PKT_SZ - header_len)
+		return -EMSGSIZE;
+	return ALIGN(payload, 4) + header_len;
+}
+
 static void qrtr_gunyah_read_new(struct qrtr_gunyah_dev *qdev)
 {
 	struct gunyah_ring *ring = &qdev->ring;
 	size_t rx_avail;
 	size_t pkt_len;
-	u32 hdr[8];
+	__le32 hdr[8];
 	int rc;
 	size_t hdr_len = sizeof(hdr);
 
 	gunyah_rx_peak(&qdev->rx_pipe, &hdr, 0, hdr_len);
-	pkt_len = qrtr_peek_pkt_size((void *)&hdr);
+	pkt_len = qrtr_gunyah_pkt_size(hdr);
 	if ((int)pkt_len < 0 || pkt_len > MAX_PKT_SZ) {
 		/* Corrupted packet, reset the pipe and discard existing data */
 		rx_avail = gunyah_rx_avail(&qdev->rx_pipe);

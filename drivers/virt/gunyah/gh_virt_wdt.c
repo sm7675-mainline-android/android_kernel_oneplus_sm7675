@@ -292,7 +292,7 @@ static int __init init_watchdog(void)
 	return platform_driver_register(&gh_wdt_driver);
 }
 
-#if IS_MODULE(CONFIG_GH_VIRT_WATCHDOG)
+#ifdef MODULE
 module_init(init_watchdog);
 #else
 pure_initcall(init_watchdog);

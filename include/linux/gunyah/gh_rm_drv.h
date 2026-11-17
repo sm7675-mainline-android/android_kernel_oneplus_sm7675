@@ -459,8 +459,9 @@ static inline int gh_rm_unregister_notifier(struct notifier_block *nb)
 }
 
 /* Client APIs for IRQ management */
-static inline int gh_rm_virq_to_irq(u32 virq)
+static inline int gh_rm_virq_to_irq(u32 virq, u32 type)
 {
+	(void)type;
 	return -EINVAL;
 }
 
@@ -582,6 +583,11 @@ static inline int ghd_rm_vm_reset(gh_vmid_t vmid)
 
 /* Client APIs for VM query */
 static inline int gh_rm_populate_hyp_res(gh_vmid_t vmid, const char *vm_name)
+{
+	return -EINVAL;
+}
+
+static inline int gh_rm_unpopulate_hyp_res(gh_vmid_t vmid, const char *vm_name)
 {
 	return -EINVAL;
 }

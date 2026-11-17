@@ -192,7 +192,7 @@ irqfd_shutdown(struct work_struct *work)
 		eventfd_ctx_put(irq->ctx);
 		fdput(irq->fd);
 		irq->ctx = NULL;
-		irq->fd.file = NULL;
+		irq->fd = (struct fd){0};
 	}
 	spin_unlock_irqrestore(&vb_dev->lock, iflags);
 }
@@ -235,18 +235,18 @@ static int vb_dev_irqfd(struct virtio_backend_device *vb_dev,
 	__poll_t events;
 	unsigned long flags;
 
-	f.file = NULL;
+	f = (struct fd){0};
 
 	spin_lock_irqsave(&vb_dev->lock, flags);
 
-	if (vb_dev->irq.fd.file)
+	if (!fd_empty(vb_dev->irq.fd))
 		goto fail;
 
 	f = fdget(ifd->fd);
-	if (!f.file)
+	if (fd_empty(f))
 		goto fail;
 
-	eventfd = eventfd_ctx_fileget(f.file);
+	eventfd = eventfd_ctx_fileget(fd_file(f));
 	if (IS_ERR(eventfd)) {
 		ret = PTR_ERR(eventfd);
 		goto fail;
@@ -259,7 +259,7 @@ static int vb_dev_irqfd(struct virtio_backend_device *vb_dev,
 	init_waitqueue_func_entry(&vb_dev->irq.wait, vb_dev_irqfd_wakeup);
 	INIT_WORK(&vb_dev->irq.shutdown_work, irqfd_shutdown);
 	init_poll_funcptr(&vb_dev->irq.pt, vb_dev_irqfd_ptable_queue_proc);
-	events = vfs_poll(f.file, &vb_dev->irq.pt);
+	events = vfs_poll(fd_file(f), &vb_dev->irq.pt);
 	if (events & EPOLLIN) {
 		dev_dbg(vb_dev->vm->dev,
 			"%s: Premature injection of interrupt\n",
@@ -271,7 +271,7 @@ static int vb_dev_irqfd(struct virtio_backend_device *vb_dev,
 fail:
 	if (eventfd && !IS_ERR(eventfd))
 		eventfd_ctx_put(eventfd);
-	if (f.file)
+	if (!fd_empty(f))
 		fdput(f);
 
 	spin_unlock_irqrestore(&vb_dev->lock, flags);
@@ -319,7 +319,7 @@ static void signal_vqs(struct virtio_backend_device *vb_dev)
 	for (i = 0; i < MAX_IO_CONTEXTS; ++i) {
 		flags = 1 << i;
 		if ((vb_dev->vdev_event_data & flags) && vb_dev->ioctx[i].ctx) {
-			eventfd_signal(vb_dev->ioctx[i].ctx, 1);
+			eventfd_signal(vb_dev->ioctx[i].ctx);
 			vb_dev->vdev_event_data &= ~flags;
 			trace_gh_virtio_backend_queue_notify(vb_dev->label, i);
 		}
