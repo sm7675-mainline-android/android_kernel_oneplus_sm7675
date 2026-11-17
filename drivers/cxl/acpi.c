@@ -548,5 +548,5 @@ static void __exit cxl_acpi_exit(void)
 module_init(cxl_acpi_init);
 module_exit(cxl_acpi_exit);
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(CXL);
-MODULE_IMPORT_NS(ACPI);
+MODULE_IMPORT_NS("CXL");
+MODULE_IMPORT_NS("ACPI");

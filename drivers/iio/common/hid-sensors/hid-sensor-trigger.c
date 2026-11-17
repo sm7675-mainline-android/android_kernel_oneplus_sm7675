@@ -324,4 +324,4 @@ EXPORT_SYMBOL_NS(hid_sensor_pm_ops, IIO_HID);
 MODULE_AUTHOR("Srinivas Pandruvada <srinivas.pandruvada@intel.com>");
 MODULE_DESCRIPTION("HID Sensor trigger processing");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(IIO_HID_ATTRIBUTES);
+MODULE_IMPORT_NS("IIO_HID_ATTRIBUTES");

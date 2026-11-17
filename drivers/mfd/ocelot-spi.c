@@ -298,4 +298,4 @@ module_spi_driver(ocelot_spi_driver);
 MODULE_DESCRIPTION("SPI Controlled Ocelot Chip Driver");
 MODULE_AUTHOR("Colin Foster <colin.foster@in-advantage.com>");
 MODULE_LICENSE("Dual MIT/GPL");
-MODULE_IMPORT_NS(MFD_OCELOT);
+MODULE_IMPORT_NS("MFD_OCELOT");

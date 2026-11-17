@@ -644,4 +644,4 @@ out:
 	return mem_node;
 }
 
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");

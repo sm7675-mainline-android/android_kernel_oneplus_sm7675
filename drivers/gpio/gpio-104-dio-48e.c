@@ -23,7 +23,7 @@
 
 #include "gpio-i8255.h"
 
-MODULE_IMPORT_NS(I8255);
+MODULE_IMPORT_NS("I8255");
 
 #define DIO48E_EXTENT 16
 #define MAX_NUM_DIO48E max_num_isa_dev(DIO48E_EXTENT)

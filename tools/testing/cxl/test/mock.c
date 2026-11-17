@@ -225,5 +225,5 @@ int __wrap_cxl_hdm_decode_init(struct cxl_dev_state *cxlds,
 EXPORT_SYMBOL_NS_GPL(__wrap_cxl_hdm_decode_init, CXL);
 
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(ACPI);
-MODULE_IMPORT_NS(CXL);
+MODULE_IMPORT_NS("ACPI");
+MODULE_IMPORT_NS("CXL");

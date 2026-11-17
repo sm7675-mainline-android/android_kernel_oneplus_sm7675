@@ -96,4 +96,4 @@ EXPORT_SYMBOL_NS(ssp_common_process_data, IIO_SSP_SENSORS);
 MODULE_AUTHOR("Karol Wrona <k.wrona@samsung.com>");
 MODULE_DESCRIPTION("Samsung sensorhub commons");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(IIO_SSP_SENSORS);
+MODULE_IMPORT_NS("IIO_SSP_SENSORS");
