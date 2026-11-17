@@ -69,7 +69,7 @@ struct lt9611uxc {
 
 	struct device_node *host_node;
 	struct mipi_dsi_device *dsi;
-	struct edid *edid;
+	const struct drm_edid *edid;
 	struct mutex lock;
 	struct drm_connector connector;
 
@@ -141,7 +141,7 @@ void lt9611uxc_hpd_work(struct work_struct *work)
 	if (pdata->connector.status != connector_status_connected) {
 		pr_debug("release edid\n");
 		pdata->edid_complete = false;
-		kfree(pdata->edid);
+		drm_edid_free(pdata->edid);
 		pdata->edid = NULL;
 	}
 
@@ -1415,15 +1415,14 @@ static int lt9611uxc_connector_get_modes(struct drm_connector *connector)
 read_edid:
 	if (!pdata->edid) {
 		lt9611uxc_read_edid(pdata);
-		pdata->edid = drm_do_get_edid(connector,
+		pdata->edid = drm_edid_read_custom(connector,
 				lt9611uxc_get_edid_block, pdata);
 	}
 
 skip_read_edid:
 	if (pdata->edid) {
-		drm_connector_update_edid_property(connector,
-			pdata->edid);
-		count = drm_add_edid_modes(connector, pdata->edid);
+		drm_edid_connector_update(connector, pdata->edid);
+		count = drm_edid_connector_add_modes(connector);
 	} else {
 		list_for_each_entry(mode, &pdata->mode_list, head) {
 			m = drm_mode_duplicate(connector->dev, mode);

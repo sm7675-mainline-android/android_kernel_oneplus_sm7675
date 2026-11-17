@@ -148,7 +148,6 @@ void panel_event_notification_trigger(enum panel_event_notifier_tag tag,
 
 		/* skip client entries not subscribed to tag */
 		if (entry->tag != tag) {
-			pr_err("tag mismatch entry->tag:%d tag:%d\n", entry->tag, tag);
 			mutex_unlock(&panel_event_notifier_entries_lock);
 			continue;
 		}
