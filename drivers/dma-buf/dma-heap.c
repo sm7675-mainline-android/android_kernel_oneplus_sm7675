@@ -452,7 +452,7 @@ static int dma_heap_init(void)
 	if (ret)
 		goto err_chrdev;
 
-	dma_heap_class = class_create(THIS_MODULE, DEVNAME);
+	dma_heap_class = class_create(DEVNAME);
 	if (IS_ERR(dma_heap_class)) {
 		ret = PTR_ERR(dma_heap_class);
 		goto err_class;

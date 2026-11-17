@@ -2749,7 +2749,7 @@ static int msm_sps_probe(struct platform_device *pdev)
 	}
 
 	/* Create Device */
-	sps->dev_class = class_create(THIS_MODULE, SPS_DRV_NAME);
+	sps->dev_class = class_create(SPS_DRV_NAME);
 
 	ret = alloc_chrdev_region(&sps->dev_num, 0, 1, SPS_DRV_NAME);
 	if (ret) {

@@ -396,7 +396,7 @@ static int __init mem_buf_init(void)
 	if (ret < 0)
 		goto err_chrdev_region;
 
-	mem_buf_class = class_create(THIS_MODULE, "membuf");
+	mem_buf_class = class_create("membuf");
 	if (IS_ERR(mem_buf_class)) {
 		ret = PTR_ERR(mem_buf_class);
 		goto err_class_create;
@@ -427,4 +427,4 @@ module_exit(mem_buf_exit);
 
 MODULE_DESCRIPTION("Qualcomm Technologies, Inc. Memory Buffer Sharing driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");

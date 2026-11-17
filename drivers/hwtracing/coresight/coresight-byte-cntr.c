@@ -304,8 +304,7 @@ static int byte_cntr_register_chardev(struct byte_cntr *byte_cntr_data)
 	if (ret)
 		goto exit_unreg_chrdev_region;
 
-	byte_cntr_data->driver_class = class_create(THIS_MODULE,
-						   byte_cntr_data->class_name);
+	byte_cntr_data->driver_class = class_create(byte_cntr_data->class_name);
 	if (IS_ERR(byte_cntr_data->driver_class)) {
 		ret = -ENOMEM;
 		pr_err("class_create failed %d\n", ret);

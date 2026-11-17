@@ -746,7 +746,7 @@ fail:
 static int32_t virt_npu_unmap_buf(struct npu_client *client,
 		 int buf_hdl,  uint64_t iova)
 {
-	MODULE_IMPORT_NS(DMA_BUF);
+	MODULE_IMPORT_NS("DMA_BUF");
 	struct npu_ion_buf *ion_buf;
 
 	/* clear entry and retrieve the corresponding buffer */
@@ -895,7 +895,7 @@ fail:
 static int32_t virt_npu_map_buf(struct npu_client *client,
 		int buf_hdl, uint32_t size, uint64_t *iova)
 {
-	MODULE_IMPORT_NS(DMA_BUF);
+	MODULE_IMPORT_NS("DMA_BUF");
 	struct npu_device *npu_dev = client->npu_dev;
 	struct npu_ion_buf *ion_buf = NULL;
 	int rc = 0;
@@ -2464,7 +2464,7 @@ static int virt_npu_probe(struct virtio_device *vdev)
 		goto cdev_init_fail;
 	}
 
-	npu_dev->class = class_create(THIS_MODULE, CLASS_NAME);
+	npu_dev->class = class_create(CLASS_NAME);
 	if (IS_ERR(npu_dev->class)) {
 		rc = PTR_ERR(npu_dev->class);
 		NPU_ERR("class_create failed: %d\n", rc);

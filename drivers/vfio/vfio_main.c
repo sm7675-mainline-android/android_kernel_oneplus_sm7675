@@ -1831,7 +1831,7 @@ static int __init vfio_init(void)
 		return ret;
 
 	/* /dev/vfio/$GROUP */
-	vfio.class = class_create(THIS_MODULE, "vfio");
+	vfio.class = class_create("vfio");
 	if (IS_ERR(vfio.class)) {
 		ret = PTR_ERR(vfio.class);
 		goto err_group_class;
@@ -1840,7 +1840,7 @@ static int __init vfio_init(void)
 	vfio.class->devnode = vfio_devnode;
 
 	/* /sys/class/vfio-dev/vfioX */
-	vfio.device_class = class_create(THIS_MODULE, "vfio-dev");
+	vfio.device_class = class_create("vfio-dev");
 	if (IS_ERR(vfio.device_class)) {
 		ret = PTR_ERR(vfio.device_class);
 		goto err_dev_class;

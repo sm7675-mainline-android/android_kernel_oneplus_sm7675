@@ -4170,7 +4170,7 @@ static int qcom_hgsl_register(struct platform_device *pdev,
 		return ret;
 	}
 
-	hgsl_dev->driver_class = class_create(THIS_MODULE, HGSL_DEVICE_NAME);
+	hgsl_dev->driver_class = class_create(HGSL_DEVICE_NAME);
 	if (IS_ERR(hgsl_dev->driver_class)) {
 		ret = -ENOMEM;
 		dev_err(&pdev->dev, "class_create failed %d\n", ret);
@@ -4481,7 +4481,7 @@ static void __exit hgsl_exit(void)
 module_init(hgsl_init);
 module_exit(hgsl_exit);
 
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 
 MODULE_DESCRIPTION("QTI Hypervisor Graphics system driver");
 MODULE_LICENSE("GPL");

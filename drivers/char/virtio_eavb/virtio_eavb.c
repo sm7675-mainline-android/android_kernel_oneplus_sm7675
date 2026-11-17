@@ -1575,7 +1575,7 @@ static int virtio_eavb_probe(struct virtio_device *vdev)
 	if (ret)
 		goto free_chrdev;
 
-	priv->class = class_create(THIS_MODULE, "virt-eavb");
+	priv->class = class_create("virt-eavb");
 	if (IS_ERR(priv->class))
 		goto class_create_fail;
 

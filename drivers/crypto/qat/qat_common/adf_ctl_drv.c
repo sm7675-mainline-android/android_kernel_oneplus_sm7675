@@ -56,7 +56,7 @@ static int adf_chr_drv_create(void)
 		return -EFAULT;
 	}
 
-	adf_ctl_drv.drv_class = class_create(THIS_MODULE, DEVICE_NAME);
+	adf_ctl_drv.drv_class = class_create(DEVICE_NAME);
 	if (IS_ERR(adf_ctl_drv.drv_class)) {
 		pr_err("QAT: class_create failed for adf_ctl\n");
 		goto err_chrdev_unreg;
@@ -474,4 +474,4 @@ MODULE_AUTHOR("Intel");
 MODULE_DESCRIPTION("Intel(R) QuickAssist Technology");
 MODULE_ALIAS_CRYPTO("intel_qat");
 MODULE_VERSION(ADF_DRV_VERSION);
-MODULE_IMPORT_NS(CRYPTO_INTERNAL);
+MODULE_IMPORT_NS("CRYPTO_INTERNAL");

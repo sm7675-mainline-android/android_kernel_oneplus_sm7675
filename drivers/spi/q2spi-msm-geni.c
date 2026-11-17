@@ -3367,7 +3367,7 @@ static int q2spi_chardev_create(struct q2spi_geni *q2spi)
 		return ret;
 	}
 	q2spi_cdev_major = MAJOR(q2spi->chrdev.q2spi_dev);
-	q2spi->chrdev.q2spi_class = class_create(THIS_MODULE, "q2spidev");
+	q2spi->chrdev.q2spi_class = class_create("q2spidev");
 	if (IS_ERR(q2spi->chrdev.q2spi_class)) {
 		Q2SPI_DEBUG(q2spi, "%s ret:%lx\n", __func__, PTR_ERR(q2spi->chrdev.q2spi_class));
 		ret = PTR_ERR(q2spi->chrdev.q2spi_class);

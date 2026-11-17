@@ -366,7 +366,7 @@ static int __init qti_virtio_mem_init(void)
 	if (ret < 0)
 		goto err_chrdev_region;
 
-	qvm_class = class_create(THIS_MODULE, "qti_virtio_mem");
+	qvm_class = class_create("qti_virtio_mem");
 	if (IS_ERR(qvm_class)) {
 		ret = PTR_ERR(qvm_class);
 		goto err_class_create;

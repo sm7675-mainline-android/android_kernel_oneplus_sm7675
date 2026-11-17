@@ -1141,7 +1141,7 @@ static int __init rdbg_init(void)
 		pr_err("Error in cdev_add\n");
 		goto chrdev_bail;
 	}
-	rdbgdevice->class = class_create(THIS_MODULE, "rdbg");
+	rdbgdevice->class = class_create("rdbg");
 	if (IS_ERR(rdbgdevice->class)) {
 		err = PTR_ERR(rdbgdevice->class);
 		pr_err("Error in class_create\n");

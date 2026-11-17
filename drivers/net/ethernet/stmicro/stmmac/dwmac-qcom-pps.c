@@ -433,7 +433,7 @@ int create_pps_interrupt_device_node(dev_t *pps_dev_t,
 		goto cdev1_add_fail;
 	}
 
-	*pps_class = class_create(THIS_MODULE, pps_dev_node_name);
+	*pps_class = class_create(pps_dev_node_name);
 	if (!*pps_class) {
 		ret = -ENODEV;
 		ETHQOSERR("failed to create class\n");
