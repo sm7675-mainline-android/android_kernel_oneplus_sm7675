@@ -454,7 +454,7 @@ struct task_group {
 	/* Latency-sensitive flag used for a task group */
 	unsigned int		latency_sensitive;
 
-	ANDROID_VENDOR_DATA_ARRAY(1, 4);
+	ANDROID_VENDOR_DATA_ARRAY(1, 8);
 #endif
 
 	ANDROID_KABI_RESERVE(1);
@@ -3131,7 +3131,7 @@ static inline unsigned long cpu_util_cfs(int cpu)
 
 	if (sched_feat(UTIL_EST)) {
 		util = max_t(unsigned long, util,
-			     READ_ONCE(cfs_rq->avg.util_est.enqueued));
+			     READ_ONCE(cfs_rq->avg.util_est));
 	}
 
 	return min(util, capacity_orig_of(cpu));

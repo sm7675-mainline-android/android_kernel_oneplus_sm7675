@@ -566,7 +566,7 @@ static unsigned long waltgov_get_util(struct waltgov_cpu *wg_cpu)
 	wg_cpu->max = max;
 	wg_cpu->reasons = 0;
 	util = cpu_util_freq_walt(wg_cpu->cpu, &wg_cpu->walt_load, &wg_cpu->reasons);
-	return uclamp_rq_util_with(rq, util, NULL);
+	return walt_uclamp_rq_util_with(rq, util);
 }
 
 #define NL_RATIO 75

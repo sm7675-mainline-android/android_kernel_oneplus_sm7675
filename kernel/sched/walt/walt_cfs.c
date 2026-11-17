@@ -41,20 +41,25 @@ static void create_util_to_cost_pd(struct em_perf_domain *pd)
 	int util, cpu = cpumask_first(to_cpumask(pd->cpus));
 	unsigned long fmax;
 	unsigned long scale_cpu;
+	struct em_perf_state *table;
 	struct walt_rq *wrq = &per_cpu(walt_rq, cpu);
 	struct walt_sched_cluster *cluster = wrq->cluster;
 
-	fmax = (u64)pd->table[pd->nr_perf_states - 1].frequency;
+	table = em_perf_state_from_pd(pd);
+	if (!table)
+		return;
+
+	fmax = (u64)table[pd->nr_perf_states - 1].frequency;
 	scale_cpu = arch_scale_cpu_capacity(cpu);
 
 	for (util = 0; util < 1024; util++) {
 		int j;
 
 		int f = (fmax * util) / scale_cpu;
-		struct em_perf_state *ps = &pd->table[0];
+		struct em_perf_state *ps = &table[0];
 
 		for (j = 0; j < pd->nr_perf_states; j++) {
-			ps = &pd->table[j];
+			ps = &table[j];
 			if (ps->frequency >= f)
 				break;
 		}
@@ -1211,10 +1216,18 @@ walt_select_task_rq_fair(void *unused, struct task_struct *p, int prev_cpu,
 	*target_cpu = walt_find_energy_efficient_cpu(p, prev_cpu, sync, sibling_count_hint);
 }
 
-static void walt_binder_low_latency_set(void *unused, struct task_struct *task,
-					bool sync, struct binder_proc *proc)
+static void walt_binder_low_latency_set(void *unused,
+					struct binder_proc *proc,
+					struct binder_transaction *transaction,
+					struct task_struct *task,
+					bool pending_async, bool sync)
 {
-	struct walt_task_struct *wts = (struct walt_task_struct *) task->android_vendor_data1;
+	struct walt_task_struct *wts;
+
+	if (!task)
+		return;
+
+	wts = (struct walt_task_struct *)task->android_vendor_data1;
 
 	if (unlikely(walt_disabled))
 		return;
@@ -1247,16 +1260,18 @@ static void binder_set_priority_hook(void *data,
 	if (unlikely(walt_disabled))
 		return;
 
-	if (bndrtrans && bndrtrans->need_reply && current_wts->boost == TASK_BOOST_STRICT_MAX) {
+	if (bndrtrans && bndrtrans->from &&
+			current_wts->boost == TASK_BOOST_STRICT_MAX) {
 		bndrtrans->android_vendor_data1  = wts->boost;
 		wts->boost = TASK_BOOST_STRICT_MAX;
 	}
 }
 
 static void binder_restore_priority_hook(void *data,
-				struct binder_transaction *bndrtrans, struct task_struct *task)
+				struct binder_transaction *bndrtrans)
 {
-	struct walt_task_struct *wts = (struct walt_task_struct *) task->android_vendor_data1;
+	struct walt_task_struct *wts = (struct walt_task_struct *)
+			current->android_vendor_data1;
 
 	if (unlikely(walt_disabled))
 		return;
@@ -1516,8 +1531,7 @@ out:
  */
 static void walt_cfs_check_preempt_wakeup(void *unused, struct rq *rq, struct task_struct *p,
 					  bool *preempt, bool *nopreempt, int wake_flags,
-					  struct sched_entity *se, struct sched_entity *pse,
-					  int next_buddy_marked, unsigned int granularity)
+					  struct sched_entity *se, struct sched_entity *pse)
 {
 	struct walt_rq *wrq = &per_cpu(walt_rq, cpu_of(rq));
 	struct walt_task_struct *wts_p = (struct walt_task_struct *) p->android_vendor_data1;
@@ -1586,28 +1600,51 @@ preempt:
 		for (; se; se = NULL)
 #endif
 
-extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se);
+extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, bool first);
+static noinline void walt_cfs_check_candidate(struct rq *rq,
+		struct task_struct *candidate, struct task_struct *donor, const char *stage)
+{
+	char snapshot[384];
+	unsigned int reason;
+
+	if (!candidate || !is_walt_sentinel())
+		return;
+
+	reason = (!!candidate->on_cpu && !task_current(rq, candidate)) |
+		 (!task_on_rq_queued(candidate) << 1) |
+		 ((task_cpu(candidate) != cpu_of(rq)) << 2);
+	if (!reason)
+		return;
+
+	scnprintf(snapshot, sizeof(snapshot),
+		  "stage=%s reason=%x rq=%d pick=%s/%d cpu=%d on_cpu=%d on_rq=%d se_on_rq=%d delayed=%d blocked=%d curr=%s/%d cpu=%d donor=%s/%d cpu=%d",
+		  stage, reason, cpu_of(rq), candidate->comm, candidate->pid,
+		  task_cpu(candidate), candidate->on_cpu, candidate->on_rq,
+		  candidate->se.on_rq, candidate->se.sched_delayed,
+		  task_is_blocked(candidate), rq->curr->comm, rq->curr->pid,
+		  task_cpu(rq->curr), donor->comm, donor->pid, task_cpu(donor));
+	if (walt_debug_feat_print(WALT_BUG_UPSTREAM))
+		printk_deferred("WALT-PICK %s\n", snapshot);
+	if (walt_debug_feat_panic(WALT_BUG_UPSTREAM) && !in_sched_bug) {
+		in_sched_bug = 1;
+		walt_task_dump(candidate);
+		walt_dump();
+		panic("WALT-PICK %s", snapshot);
+	}
+}
+
 static void walt_cfs_replace_next_task_fair(void *unused, struct rq *rq, struct task_struct **p,
-					    struct sched_entity **se, bool *repick, bool simple,
 					    struct task_struct *prev)
 {
 #if (!IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST))
 	struct walt_rq *wrq = &per_cpu(walt_rq, cpu_of(rq));
 	struct walt_task_struct *wts;
 	struct task_struct *mvp;
-	struct cfs_rq *cfs_rq;
 
 	if (unlikely(walt_disabled))
 		return;
 
-	if ((*p) && (*p) != prev && ((*p)->on_cpu == 1 || (*p)->on_rq == 0 ||
-				     (*p)->on_rq == TASK_ON_RQ_MIGRATING ||
-				     task_thread_info(*p)->cpu != cpu_of(rq)))
-		WALT_BUG(WALT_BUG_UPSTREAM, *p,
-			 "picked %s(%d) on_cpu=%d on_rq=%d p->cpu=%d cpu_of(rq)=%d kthread=%d\n",
-			 (*p)->comm, (*p)->pid, (*p)->on_cpu,
-			 (*p)->on_rq, task_thread_info(*p)->cpu,
-			 cpu_of(rq), ((*p)->flags & PF_KTHREAD));
+	walt_cfs_check_candidate(rq, *p, prev, "fair");
 
 	/* RQ is in MVP throttled state*/
 	if (wrq->skip_mvp)
@@ -1623,37 +1660,17 @@ static void walt_cfs_replace_next_task_fair(void *unused, struct rq *rq, struct 
 	mvp = wts_to_ts(wts);
 
 	*p = mvp;
-	*se = &mvp->se;
-	*repick = true;
 
 	/* TODO: check with team if it is fine in case clock is not updated */
 	/* Mark arrival of MVP task */
 	if (!wrq->mvp_arrival_time)
 		wrq->mvp_arrival_time = rq->clock;
 
-	if (simple) {
-		for_each_sched_entity((*se)) {
-			/*
-			 * TODO If CFS_BANDWIDTH is enabled, we might pick
-			 * from a throttled cfs_rq
-			 */
-			cfs_rq = cfs_rq_of(*se);
-			set_next_entity(cfs_rq, *se);
-		}
-	}
-
-	if ((*p) && (*p) != prev && ((*p)->on_cpu == 1 || (*p)->on_rq == 0 ||
-				     (*p)->on_rq == TASK_ON_RQ_MIGRATING ||
-				     task_thread_info(*p)->cpu != cpu_of(rq)))
-		WALT_BUG(WALT_BUG_UPSTREAM, *p,
-			 "picked %s(%d) on_cpu=%d on_rq=%d p->cpu=%d cpu_of(rq)=%d kthread=%d\n",
-			 (*p)->comm, (*p)->pid, (*p)->on_cpu,
-			 (*p)->on_rq, task_thread_info(*p)->cpu,
-			 cpu_of(rq), ((*p)->flags & PF_KTHREAD));
+	walt_cfs_check_candidate(rq, *p, prev, "mvp");
 
 	trace_walt_cfs_mvp_pick_next(mvp, wts, walt_cfs_mvp_task_limit(mvp));
 #else
-	android_rvh_replace_next_task_fair_handler(NULL, rq, p, se, repick, simple, prev);
+	android_rvh_replace_next_task_fair_handler(NULL, rq, p, prev);
 #endif
 }
 
@@ -1661,11 +1678,13 @@ void walt_cfs_init(void)
 {
 	register_trace_android_rvh_select_task_rq_fair(walt_select_task_rq_fair, NULL);
 
-	register_trace_android_vh_binder_wakeup_ilocked(walt_binder_low_latency_set, NULL);
+	register_trace_android_vh_binder_proc_transaction_finish(
+			walt_binder_low_latency_set, NULL);
 
 	register_trace_android_vh_binder_set_priority(binder_set_priority_hook, NULL);
 	register_trace_android_vh_binder_restore_priority(binder_restore_priority_hook, NULL);
 
-	register_trace_android_rvh_check_preempt_wakeup(walt_cfs_check_preempt_wakeup, NULL);
+	register_trace_android_rvh_check_preempt_wakeup_fair(
+			walt_cfs_check_preempt_wakeup, NULL);
 	register_trace_android_rvh_replace_next_task_fair(walt_cfs_replace_next_task_fair, NULL);
 }

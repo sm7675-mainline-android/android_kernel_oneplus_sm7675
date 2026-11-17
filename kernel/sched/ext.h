@@ -101,7 +101,7 @@ enum scx_kick_flags {
 	SCX_KICK_WAIT		= 1LLU << 1,	/* wait for the CPU to be rescheduled */
 };
 
-#ifdef CONFIG_SCHED_CLASS_EXT
+#if defined(CONFIG_SCHED_CLASS_EXT) && defined(CONFIG_SLIM_SCHED)
 
 extern const struct sched_class ext_sched_class;
 extern const struct bpf_verifier_ops bpf_sched_ext_verifier_ops;
@@ -222,7 +222,7 @@ static inline void scx_notify_sched_tick(void) {}
 
 #endif	/* CONFIG_SCHED_CLASS_EXT */
 
-#if defined(CONFIG_SCHED_CLASS_EXT) && defined(CONFIG_SMP)
+#if defined(CONFIG_SCHED_CLASS_EXT) && defined(CONFIG_SLIM_SCHED) && defined(CONFIG_SMP)
 void __scx_update_idle(struct rq *rq, bool idle);
 
 static inline void scx_update_idle(struct rq *rq, bool idle)

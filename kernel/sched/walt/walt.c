@@ -86,6 +86,7 @@ DEFINE_SPINLOCK(cpus_taken_lock);
 DEFINE_PER_CPU(int, cpus_taken_refcount);
 
 DEFINE_PER_CPU(struct walt_rq, walt_rq);
+DEFINE_PER_CPU(unsigned long, walt_cpu_capacity_orig);
 EXPORT_PER_CPU_SYMBOL_GPL(walt_rq);
 
 unsigned int sysctl_sched_user_hint;
@@ -1099,13 +1100,16 @@ static void migrate_busy_time_subtraction(struct task_struct *p, int new_cpu)
 	long pstate;
 	struct walt_rq *src_wrq = &per_cpu(walt_rq, cpu_of(src_rq));
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
+	bool lock_src_rq;
 
-	if (!p->on_rq && READ_ONCE(p->__state) != TASK_WAKING)
+	if (!p->on_rq && READ_ONCE(p->__state) != TASK_WAKING &&
+	    !task_is_blocked(p))
 		return;
 
 	pstate = READ_ONCE(p->__state);
+	lock_src_rq = pstate == TASK_WAKING || !p->on_rq;
 
-	if (pstate == TASK_WAKING) {
+	if (lock_src_rq) {
 		raw_spin_rq_lock(src_rq);
 		rq_lock_diagnostic(src_rq, true);
 	}
@@ -1176,7 +1180,7 @@ static void migrate_busy_time_subtraction(struct task_struct *p, int new_cpu)
 
 	wts->prev_cpu = task_cpu(p);
 
-	if (pstate == TASK_WAKING) {
+	if (lock_src_rq) {
 		rq_lock_diagnostic(src_rq, false);
 		raw_spin_rq_unlock(src_rq);
 	}
@@ -1411,7 +1415,7 @@ static void update_task_pred_demand(struct rq *rq, struct task_struct *p, int ev
 	 * related groups
 	 */
 	if (event == TASK_UPDATE) {
-		if (!p->on_rq && !SCHED_FREQ_ACCOUNT_WAIT_TIME)
+		if ((!p->on_rq || p->se.sched_delayed) && !SCHED_FREQ_ACCOUNT_WAIT_TIME)
 			return;
 	}
 
@@ -1422,7 +1426,7 @@ static void update_task_pred_demand(struct rq *rq, struct task_struct *p, int ev
 	new_pred_demand_scaled = get_pred_busy(p, busy_to_bucket(curr_window_scaled),
 			     curr_window_scaled, wts->bucket_bitmask);
 
-	if (task_on_rq_queued(p))
+	if (task_on_rq_queued(p) && !p->se.sched_delayed)
 		fixup_walt_sched_stats_common(rq, p,
 				wts->demand_scaled,
 				new_pred_demand_scaled);
@@ -1626,7 +1630,7 @@ static int account_busy_for_cpu_time(struct rq *rq, struct task_struct *p,
 		if (rq->curr == p)
 			return 1;
 
-		return p->on_rq ? SCHED_FREQ_ACCOUNT_WAIT_TIME : 0;
+		return p->on_rq && !p->se.sched_delayed ? SCHED_FREQ_ACCOUNT_WAIT_TIME : 0;
 	}
 
 	/* TASK_MIGRATE, PICK_NEXT_TASK left */
@@ -2049,7 +2053,7 @@ account_busy_for_task_demand(struct rq *rq, struct task_struct *p, int event)
 		if (rq->curr == p)
 			return 1;
 
-		return p->on_rq ? SCHED_ACCOUNT_WAIT_TIME : 0;
+		return p->on_rq && !p->se.sched_delayed ? SCHED_ACCOUNT_WAIT_TIME : 0;
 	}
 
 	return 1;
@@ -2153,7 +2157,7 @@ static void update_history(struct rq *rq, struct task_struct *p,
 	 * average. So add the task demand separately to cumulative window
 	 * demand.
 	 */
-	if (task_on_rq_queued(p))
+	if (task_on_rq_queued(p) && !p->se.sched_delayed)
 		fixup_walt_sched_stats_common(rq, p,
 					      demand_scaled, pred_demand_scaled);
 
@@ -3538,6 +3542,34 @@ static void note_task_waking(struct task_struct *p, u64 wallclock)
  * Transfer task's cpu usage between those counters when transitioning between
  * groups
  */
+static noinline void walt_group_accounting_bug(struct rq *rq,
+		struct task_struct *p, int event, const char *counter,
+		u64 sum, u64 contribution)
+{
+	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
+	struct walt_rq *wrq = &per_cpu(walt_rq, cpu_of(rq));
+	char snapshot[384];
+
+	if (!is_walt_sentinel())
+		return;
+
+	scnprintf(snapshot, sizeof(snapshot),
+		  "%s pid=%d rq=%d cpu=%d group=%u event=%d sum=%llu task=%llu ws=%llu task_ws=%llu on_rq=%u delayed=%u blocked=%u from=%d to=%d pending=%u",
+		  counter, p->pid, cpu_of(rq), task_cpu(p),
+		  wts->grp ? wts->grp->id : 0, event, sum, contribution,
+		  wrq->window_start, wts->window_start, p->on_rq,
+		  p->se.sched_delayed, task_is_blocked(p), wts->prev_cpu,
+		  wts->new_cpu, wts->enqueue_after_migration);
+	if (walt_debug_feat_print(WALT_BUG_WALT))
+		printk_deferred("WALT-GROUP %s\n", snapshot);
+	if (walt_debug_feat_panic(WALT_BUG_WALT) && !in_sched_bug) {
+		in_sched_bug = 1;
+		walt_task_dump(p);
+		walt_dump();
+		panic("WALT-GROUP %s", snapshot);
+	}
+}
+
 static void transfer_busy_time(struct rq *rq,
 				struct walt_related_thread_group *grp,
 					struct task_struct *p, int event)
@@ -3588,41 +3620,35 @@ static void transfer_busy_time(struct rq *rq,
 		dst_nt_prev_runnable_sum = &cpu_time->nt_prev_runnable_sum;
 
 		if (*src_curr_runnable_sum < wts->curr_window_cpu[cpu]) {
-			WALT_BUG(WALT_BUG_WALT, p,
-				 "pid=%u CPU=%d event=%d src_crs=%llu is lesser than task_contrib=%llu",
-				 p->pid, cpu, event, *src_curr_runnable_sum,
-				 wts->curr_window_cpu[cpu]);
+			walt_group_accounting_bug(rq, p, event, "rq-curr",
+						  *src_curr_runnable_sum,
+						  wts->curr_window_cpu[cpu]);
 			*src_curr_runnable_sum = wts->curr_window_cpu[cpu];
 		}
 		*src_curr_runnable_sum -= wts->curr_window_cpu[cpu];
 
 		if (*src_prev_runnable_sum < wts->prev_window_cpu[cpu]) {
-			WALT_BUG(WALT_BUG_WALT, p,
-				 "pid=%u CPU=%d event=%d src_prs=%llu is lesser than task_contrib=%llu",
-				 p->pid, cpu, event, *src_prev_runnable_sum,
-				 wts->prev_window_cpu[cpu]);
+			walt_group_accounting_bug(rq, p, event, "rq-prev",
+						  *src_prev_runnable_sum,
+						  wts->prev_window_cpu[cpu]);
 			*src_prev_runnable_sum = wts->prev_window_cpu[cpu];
 		}
 		*src_prev_runnable_sum -= wts->prev_window_cpu[cpu];
 
 		if (new_task) {
 			if (*src_nt_curr_runnable_sum < wts->curr_window_cpu[cpu]) {
-				WALT_BUG(WALT_BUG_WALT, p,
-					 "pid=%u CPU=%d event=%d src_nt_crs=%llu is lesser than task_contrib=%llu",
-					 p->pid, cpu, event,
-					 *src_nt_curr_runnable_sum,
-					 wts->curr_window_cpu[cpu]);
+				walt_group_accounting_bug(rq, p, event, "rq-nt-curr",
+							  *src_nt_curr_runnable_sum,
+							  wts->curr_window_cpu[cpu]);
 				*src_nt_curr_runnable_sum = wts->curr_window_cpu[cpu];
 			}
 			*src_nt_curr_runnable_sum -=
 					wts->curr_window_cpu[cpu];
 
 			if (*src_nt_prev_runnable_sum < wts->prev_window_cpu[cpu]) {
-				WALT_BUG(WALT_BUG_WALT, p,
-					 "pid=%u CPU=%d event=%d src_nt_prs=%llu is lesser than task_contrib=%llu",
-					 p->pid, cpu, event,
-					 *src_nt_prev_runnable_sum,
-					 wts->prev_window_cpu[cpu]);
+				walt_group_accounting_bug(rq, p, event, "rq-nt-prev",
+							  *src_nt_prev_runnable_sum,
+							  wts->prev_window_cpu[cpu]);
 				*src_nt_prev_runnable_sum = wts->prev_window_cpu[cpu];
 			}
 			*src_nt_prev_runnable_sum -=
@@ -3646,40 +3672,34 @@ static void transfer_busy_time(struct rq *rq,
 		dst_nt_prev_runnable_sum = &wrq->nt_prev_runnable_sum;
 
 		if (*src_curr_runnable_sum < wts->curr_window) {
-			WALT_BUG(WALT_BUG_WALT, p,
-				 "WALT-UG pid=%u CPU=%d event=%d src_crs=%llu is lesser than task_contrib=%llu",
-				 p->pid, cpu, event, *src_curr_runnable_sum,
-				 wts->curr_window);
+			walt_group_accounting_bug(rq, p, event, "grp-curr",
+						  *src_curr_runnable_sum,
+						  wts->curr_window);
 			*src_curr_runnable_sum = wts->curr_window;
 		}
 		*src_curr_runnable_sum -= wts->curr_window;
 
 		if (*src_prev_runnable_sum < wts->prev_window) {
-			WALT_BUG(WALT_BUG_WALT, p,
-				 "pid=%u CPU=%d event=%d src_prs=%llu is lesser than task_contrib=%llu",
-				 p->pid, cpu, event, *src_prev_runnable_sum,
-				 wts->prev_window);
+			walt_group_accounting_bug(rq, p, event, "grp-prev",
+						  *src_prev_runnable_sum,
+						  wts->prev_window);
 			*src_prev_runnable_sum = wts->prev_window;
 		}
 		*src_prev_runnable_sum -= wts->prev_window;
 
 		if (new_task) {
 			if (*src_nt_curr_runnable_sum < wts->curr_window) {
-				WALT_BUG(WALT_BUG_WALT, p,
-					 "pid=%u CPU=%d event=%d src_nt_crs=%llu is lesser than task_contrib=%llu",
-						p->pid, cpu, event,
-						*src_nt_curr_runnable_sum,
-						wts->curr_window);
+				walt_group_accounting_bug(rq, p, event, "grp-nt-curr",
+							  *src_nt_curr_runnable_sum,
+							  wts->curr_window);
 				*src_nt_curr_runnable_sum = wts->curr_window;
 			}
 			*src_nt_curr_runnable_sum -= wts->curr_window;
 
 			if (*src_nt_prev_runnable_sum < wts->prev_window) {
-				WALT_BUG(WALT_BUG_WALT, p,
-					 "pid=%u CPU=%d event=%d src_nt_prs=%llu is lesser than task_contrib=%llu",
-					 p->pid, cpu, event,
-					 *src_nt_prev_runnable_sum,
-					 wts->prev_window);
+				walt_group_accounting_bug(rq, p, event, "grp-nt-prev",
+							  *src_nt_prev_runnable_sum,
+							  wts->prev_window);
 				*src_nt_prev_runnable_sum = wts->prev_window;
 			}
 			*src_nt_prev_runnable_sum -= wts->prev_window;
@@ -4486,10 +4506,9 @@ static inline void irq_work_restrict_to_mig_clusters(cpumask_t *lock_cpus)
 void update_cpu_capacity_helper(int cpu)
 {
 	unsigned long fmax_capacity = arch_scale_cpu_capacity(cpu);
-	unsigned long thermal_pressure = arch_scale_thermal_pressure(cpu);
+	unsigned long thermal_pressure = arch_scale_hw_pressure(cpu);
 	unsigned long thermal_cap, old;
 	struct walt_sched_cluster *cluster;
-	struct rq *rq = cpu_rq(cpu);
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_VT_CAP)
     int cluster_id;
 #endif
@@ -4511,23 +4530,23 @@ void update_cpu_capacity_helper(int cpu)
 		fmax_capacity = mult_frac(fmax_capacity, cluster->walt_internal_freq_limit,
 					 cluster->max_possible_freq);
 
-	old = rq->cpu_capacity_orig;
+	old = walt_capacity_orig_of(cpu);
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_VT_CAP)
 	cluster_id = topology_cluster_id(cpu);
 	if (eas_opt_enable && cluster_id >= 0 && cluster_id < OPLUS_CLUSTERS)
-		rq->cpu_capacity_orig = mult_frac(min(fmax_capacity, thermal_cap), oplus_cap_multiple[cluster_id], 100);
+		per_cpu(walt_cpu_capacity_orig, cpu) = mult_frac(min(fmax_capacity, thermal_cap), oplus_cap_multiple[cluster_id], 100);
 	else
-		rq->cpu_capacity_orig = min(fmax_capacity, thermal_cap);
+		per_cpu(walt_cpu_capacity_orig, cpu) = min(fmax_capacity, thermal_cap);
 	real_cpu_cap[cpu] = min(fmax_capacity, thermal_cap);
 #else
-	rq->cpu_capacity_orig = min(fmax_capacity, thermal_cap);
+	per_cpu(walt_cpu_capacity_orig, cpu) = min(fmax_capacity, thermal_cap);
 #endif
 
-	if (old != rq->cpu_capacity_orig) {
+	if (old != walt_capacity_orig_of(cpu)) {
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_VT_CAP)
-		oplus_cap_systrace_c(cpu, rq->cpu_capacity_orig, real_cpu_cap[cpu]);
+		oplus_cap_systrace_c(cpu, walt_capacity_orig_of(cpu), real_cpu_cap[cpu]);
 #endif
-		trace_update_cpu_capacity(cpu, fmax_capacity, rq->cpu_capacity_orig);
+		trace_update_cpu_capacity(cpu, fmax_capacity, walt_capacity_orig_of(cpu));
 	}
 }
 
@@ -4540,7 +4559,7 @@ static void android_rvh_update_cpu_capacity(void *unused, int cpu, unsigned long
 	unsigned long rt_pressure = arch_scale_cpu_capacity(cpu) - *capacity;
 
 	update_cpu_capacity_helper(cpu);
-	*capacity = max((int)(cpu_rq(cpu)->cpu_capacity_orig - rt_pressure), 0);
+	*capacity = max((int)(walt_capacity_orig_of(cpu) - rt_pressure), 0);
 }
 
 DEFINE_PER_CPU(u32, wakeup_ctr);
@@ -5063,12 +5082,19 @@ static void android_rvh_sched_cpu_dying(void *unused, int cpu)
 	clear_walt_request(cpu);
 }
 
-static void android_rvh_set_task_cpu(void *unused, struct task_struct *p, unsigned int new_cpu)
+static void android_rvh___set_task_cpu(void *unused, struct task_struct *p,
+				     unsigned int new_cpu)
 {
 	if (unlikely(walt_disabled))
 		return;
 
 	migrate_busy_time_subtraction(p, (int) new_cpu);
+}
+
+static void android_rvh_set_task_cpu(void *unused, struct task_struct *p, unsigned int new_cpu)
+{
+	if (unlikely(walt_disabled))
+		return;
 
 	if (!cpumask_test_cpu(new_cpu, p->cpus_ptr))
 		WALT_BUG(WALT_BUG_WALT, p, "selecting unaffined cpu=%d comm=%s(%d) affinity=0x%x",
@@ -5154,6 +5180,16 @@ static void android_rvh_enqueue_task(void *unused, struct rq *rq,
 
 	walt_lockdep_assert_rq(rq, p);
 
+	wallclock = walt_rq_clock(rq);
+	if (wts->enqueue_after_migration != 0) {
+		wallclock = walt_sched_clock();
+		migrate_busy_time_addition(p, cpu_of(rq), wallclock);
+		wts->enqueue_after_migration = 0;
+	}
+
+	if (p->se.sched_delayed && !(flags & ENQUEUE_DELAYED))
+		return;
+
 	if (flags & ENQUEUE_WAKEUP)
 		per_cpu(wakeup_ctr, cpu_of(rq)) += 1;
 
@@ -5169,13 +5205,6 @@ static void android_rvh_enqueue_task(void *unused, struct rq *rq,
 		WALT_BUG(WALT_BUG_UPSTREAM, p, "double enqueue detected: task_cpu=%d new_cpu=%d\n",
 			 task_cpu(p), cpu_of(rq));
 		double_enqueue = true;
-	}
-
-	wallclock = walt_rq_clock(rq);
-	if (wts->enqueue_after_migration != 0) {
-		wallclock = walt_sched_clock();
-		migrate_busy_time_addition(p, cpu_of(rq), wallclock);
-		wts->enqueue_after_migration = 0;
 	}
 
 	wts->prev_on_rq = 1;
@@ -5217,6 +5246,9 @@ static void android_rvh_dequeue_task(void *unused, struct rq *rq,
 	bool double_dequeue = false;
 
 	if (unlikely(walt_disabled))
+		return;
+
+	if (p->se.sched_delayed)
 		return;
 
 	walt_lockdep_assert_rq(rq, p);
@@ -5391,7 +5423,7 @@ static void android_vh_scheduler_tick(void *unused, struct rq *rq)
 	walt_lb_tick(rq);
 }
 
-static void android_rvh_schedule(void *unused, unsigned int sched_mode, struct task_struct *prev,
+static void android_rvh_schedule(void *unused, struct task_struct *prev,
 		struct task_struct *next, struct rq *rq)
 {
 	u64 wallclock;
@@ -5408,7 +5440,7 @@ static void android_rvh_schedule(void *unused, unsigned int sched_mode, struct t
 	}
 
 	if (likely(prev != next)) {
-		if (!prev->on_rq)
+		if (!prev->on_rq || prev->se.sched_delayed)
 			wts->last_sleep_ts = wallclock;
 		walt_update_task_ravg(prev, rq, PUT_PREV_TASK, wallclock, 0);
 		walt_update_task_ravg(next, rq, PICK_NEXT_TASK, wallclock, 0);
@@ -5590,6 +5622,7 @@ static void register_walt_hooks(void)
 	register_trace_android_rvh_update_cpu_capacity(android_rvh_update_cpu_capacity, NULL);
 	register_trace_android_rvh_sched_cpu_starting(android_rvh_sched_cpu_starting, NULL);
 	register_trace_android_rvh_sched_cpu_dying(android_rvh_sched_cpu_dying, NULL);
+	register_trace_android_rvh___set_task_cpu(android_rvh___set_task_cpu, NULL);
 	register_trace_android_rvh_set_task_cpu(android_rvh_set_task_cpu, NULL);
 	register_trace_android_rvh_new_task_stats(android_rvh_new_task_stats, NULL);
 	register_trace_android_rvh_account_irq(android_rvh_account_irq, NULL);
@@ -5644,9 +5677,9 @@ static int walt_init_stop_handler(void *data)
 		level++;
 	}
 
-	do_each_thread(g, p) {
+	for_each_process_thread(g, p) {
 		init_new_task_load(p);
-	} while_each_thread(g, p);
+	}
 
 	for_each_possible_cpu(cpu) {
 		struct rq *rq = cpu_rq(cpu);
@@ -5716,7 +5749,6 @@ static void walt_init(struct work_struct *work)
 	struct ctl_table_header *hdr;
 	static atomic_t already_inited = ATOMIC_INIT(0);
 	struct root_domain *rd = cpu_rq(cpumask_first(cpu_active_mask))->rd;
-	int i;
 
 	might_sleep();
 
@@ -5766,19 +5798,23 @@ static void walt_init(struct work_struct *work)
 			 "root domain's perf-domain values not initialized rd->pd=%d.",
 			 rd->pd);
 
-	hdr = register_sysctl_table(walt_base_table);
-	kmemleak_not_leak(hdr);
+	hdr = register_sysctl_sz("walt", walt_table, walt_table_size);
+	if (hdr)
+		kmemleak_not_leak(hdr);
+	else
+		pr_err("WALT: failed to register scheduler sysctls\n");
+	hdr = register_sysctl_sz("walt/input_boost", input_boost_sysctls,
+				input_boost_sysctls_size);
+	if (hdr)
+		kmemleak_not_leak(hdr);
+	else
+		pr_err("WALT: failed to register input boost sysctls\n");
 
 	input_boost_init();
 	core_ctl_init();
 	walt_boost_init();
 	waltgov_register();
 
-	i = match_string(sched_feat_names, __SCHED_FEAT_NR, "TTWU_QUEUE");
-	if (i >= 0) {
-		static_key_disable(&sched_feat_keys[i]);
-		sysctl_sched_features &= ~(1UL << i);
-	}
 
 	topology_clear_scale_freq_source(SCALE_FREQ_SOURCE_ARCH, cpu_online_mask);
 }
@@ -5789,15 +5825,15 @@ static void android_vh_update_topology_flags_workfn(void *unused, void *unused2)
 	schedule_work(&walt_init_work);
 }
 
-#define WALT_VENDOR_DATA_SIZE_TEST(wstruct, kstruct)		\
-	BUILD_BUG_ON(sizeof(wstruct) > (sizeof(u64) *		\
-		ARRAY_SIZE(((kstruct *)0)->android_vendor_data1)))
-
 static int walt_module_init(void)
 {
 	/* compile time checks for vendor data size */
-	WALT_VENDOR_DATA_SIZE_TEST(struct walt_task_struct, struct task_struct);
-	WALT_VENDOR_DATA_SIZE_TEST(struct walt_task_group, struct task_group);
+	BUILD_BUG_ON_MSG(sizeof(struct walt_task_struct) >
+		(sizeof(u64) * ARRAY_SIZE(((struct task_struct *)0)->android_vendor_data1)),
+		"WALT task vendor data is too small");
+	BUILD_BUG_ON_MSG(sizeof(struct walt_task_group) >
+		(sizeof(u64) * ARRAY_SIZE(((struct task_group *)0)->android_vendor_data1)),
+		"WALT group vendor data is too small");
 
 	register_trace_android_vh_update_topology_flags_workfn(
 			android_vh_update_topology_flags_workfn, NULL);

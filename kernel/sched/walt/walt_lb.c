@@ -36,18 +36,24 @@ static inline unsigned long walt_lb_cpu_util(int cpu)
 	return wrq->walt_stats.cumulative_runnable_avg_scaled;
 }
 
-static void walt_detach_task(struct task_struct *p, struct rq *src_rq,
+static bool walt_detach_task(struct task_struct *p, struct rq *src_rq,
 			     struct rq *dst_rq)
 {
+	lockdep_assert_rq_held(src_rq);
+	if (task_on_cpu(src_rq, p) || task_current_donor(src_rq, p) ||
+	    task_is_blocked(p) || is_migration_disabled(p))
+		return false;
+
 	//TODO can we just replace with detach_task in fair.c??
 	deactivate_task(src_rq, p, 0);
 	set_task_cpu(p, dst_rq->cpu);
+	return true;
 }
 
 static void walt_attach_task(struct task_struct *p, struct rq *rq)
 {
 	activate_task(rq, p, 0);
-	check_preempt_curr(rq, p, 0);
+	wakeup_preempt(rq, p, 0);
 }
 
 static int stop_walt_lb_active_migration(void *data)
@@ -82,8 +88,7 @@ static int stop_walt_lb_active_migration(void *data)
 			task_cpu(push_task) == busiest_cpu &&
 			cpu_active(target_cpu) &&
 			cpumask_test_cpu(target_cpu, push_task->cpus_ptr)) {
-		walt_detach_task(push_task, busiest_rq, target_rq);
-		push_task_detached = 1;
+		push_task_detached = walt_detach_task(push_task, busiest_rq, target_rq);
 	}
 
 out_unlock: /* called with busiest_rq lock */
@@ -278,6 +283,10 @@ static inline bool _walt_can_migrate_task(struct task_struct *p, int dst_cpu,
 	struct walt_rq *wrq = &per_cpu(walt_rq, task_cpu(p));
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
 
+	if (task_current_donor(task_rq(p), p) || task_is_blocked(p) ||
+	    is_migration_disabled(p))
+		return false;
+
 	/* Don't detach task if it is under active migration */
 	if (wrq->push_task == p)
 		return false;
@@ -395,7 +404,8 @@ static int walt_lb_pull_tasks(int dst_cpu, int src_cpu, struct task_struct **pul
 			break;
 	}
 	if (pull_me) {
-		walt_detach_task(pull_me, src_rq, dst_rq);
+		if (!walt_detach_task(pull_me, src_rq, dst_rq))
+			pull_me = NULL;
 		goto unlock;
 	}
 
@@ -428,7 +438,8 @@ static int walt_lb_pull_tasks(int dst_cpu, int src_cpu, struct task_struct **pul
 			break;
 	}
 	if (pull_me) {
-		walt_detach_task(pull_me, src_rq, dst_rq);
+		if (!walt_detach_task(pull_me, src_rq, dst_rq))
+			pull_me = NULL;
 		goto unlock;
 	}
 
@@ -977,7 +988,7 @@ static void walt_newidle_balance(struct rq *this_rq,
 	if (walt_balance_rt(this_rq) || this_rq->nr_running)
 		goto rt_pulled;
 
-	if (!force_overload && !READ_ONCE(this_rq->rd->overload))
+	if (!force_overload && !READ_ONCE(this_rq->rd->overloaded))
 		goto repin;
 
 	if (atomic_read(&this_rq->nr_iowait) && !enough_idle)

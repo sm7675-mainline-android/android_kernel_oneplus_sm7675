@@ -109,8 +109,8 @@ struct freq_relation_map relation_data[MAX_CLUSTERS][MAX_FREQ_RELATIONS];
 /* range is [1 .. INT_MAX] */
 static int sysctl_task_read_pid = 1;
 
-static int sched_freq_map_handler(struct ctl_table *table, int write,
-					       void __user *buffer, size_t *lenp,
+static int sched_freq_map_handler(const struct ctl_table *table, int write,
+					       void *buffer, size_t *lenp,
 					       loff_t *ppos)
 {
 	int i, idx = 0, ret = -EPERM;
@@ -204,8 +204,8 @@ unlock:
 	return ret;
 }
 
-static int walt_proc_group_thresholds_handler(struct ctl_table *table, int write,
-				       void __user *buffer, size_t *lenp,
+static int walt_proc_group_thresholds_handler(const struct ctl_table *table, int write,
+				       void *buffer, size_t *lenp,
 				       loff_t *ppos)
 {
 	int ret;
@@ -238,8 +238,8 @@ static int walt_proc_group_thresholds_handler(struct ctl_table *table, int write
 	return ret;
 }
 
-static int walt_proc_user_hint_handler(struct ctl_table *table,
-				int write, void __user *buffer, size_t *lenp,
+static int walt_proc_user_hint_handler(const struct ctl_table *table,
+				int write, void *buffer, size_t *lenp,
 				loff_t *ppos)
 {
 	int ret;
@@ -263,8 +263,8 @@ unlock:
 
 DECLARE_BITMAP(sysctl_bitmap, WALT_NR_CPUS);
 
-static int walt_proc_sbt_pause_handler(struct ctl_table *table,
-				       int write, void __user *buffer, size_t *lenp,
+static int walt_proc_sbt_pause_handler(const struct ctl_table *table,
+				       int write, void *buffer, size_t *lenp,
 				       loff_t *ppos)
 {
 	int ret = 0;
@@ -297,8 +297,8 @@ unlock:
 }
 
 /* pipeline cpus are non-prime cpus chosen to handle pipeline tasks, e.g. golds */
-static int walt_proc_pipeline_cpus_handler(struct ctl_table *table,
-					   int write, void __user *buffer, size_t *lenp,
+static int walt_proc_pipeline_cpus_handler(const struct ctl_table *table,
+					   int write, void *buffer, size_t *lenp,
 					   loff_t *ppos)
 {
 	int ret = 0;
@@ -330,8 +330,8 @@ unlock:
 	return ret;
 }
 
-static int sched_ravg_window_handler(struct ctl_table *table,
-				int write, void __user *buffer, size_t *lenp,
+static int sched_ravg_window_handler(const struct ctl_table *table,
+				int write, void *buffer, size_t *lenp,
 				loff_t *ppos)
 {
 	int ret = -EPERM;
@@ -368,8 +368,8 @@ unlock:
 }
 
 static DEFINE_MUTEX(sysctl_pid_mutex);
-static int sched_task_read_pid_handler(struct ctl_table *table, int write,
-				       void __user *buffer, size_t *lenp,
+static int sched_task_read_pid_handler(const struct ctl_table *table, int write,
+				       void *buffer, size_t *lenp,
 				       loff_t *ppos)
 {
 	int ret;
@@ -394,8 +394,8 @@ enum {
 	REDUCE_AFFINITY,
 };
 
-static int sched_task_handler(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp,
+static int sched_task_handler(const struct ctl_table *table, int write,
+				void *buffer, size_t *lenp,
 				loff_t *ppos)
 {
 	int ret, param;
@@ -604,8 +604,8 @@ static void sched_update_updown_migrate_values(bool up)
 	}
 }
 
-int sched_updown_migrate_handler(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp,
+int sched_updown_migrate_handler(const struct ctl_table *table, int write,
+				void *buffer, size_t *lenp,
 				loff_t *ppos)
 {
 	int ret, i;
@@ -696,8 +696,8 @@ static void sched_update_updown_early_migrate_values(bool up)
 	}
 }
 
-int sched_updown_early_migrate_handler(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp,
+int sched_updown_early_migrate_handler(const struct ctl_table *table, int write,
+				void *buffer, size_t *lenp,
 				loff_t *ppos)
 {
 	int ret, i;
@@ -763,8 +763,8 @@ unlock_mutex:
 	return ret;
 }
 
-int sched_fmax_cap_handler(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp,
+int sched_fmax_cap_handler(const struct ctl_table *table, int write,
+		void *buffer, size_t *lenp,
 		loff_t *ppos)
 {
 	int ret, i;
@@ -808,8 +808,8 @@ unlock_mutex:
 
 static DEFINE_MUTEX(idle_enough_mutex);
 
-int sched_idle_enough_handler(struct ctl_table *table, int write,
-			      void __user *buffer, size_t *lenp,
+int sched_idle_enough_handler(const struct ctl_table *table, int write,
+			      void *buffer, size_t *lenp,
 			      loff_t *ppos)
 {
 	int ret, i;
@@ -830,8 +830,8 @@ unlock_mutex:
 	return ret;
 }
 
-int sched_idle_enough_clust_handler(struct ctl_table *table, int write,
-				    void __user *buffer, size_t *lenp,
+int sched_idle_enough_clust_handler(const struct ctl_table *table, int write,
+				    void *buffer, size_t *lenp,
 				    loff_t *ppos)
 {
 	int ret;
@@ -869,8 +869,8 @@ unlock_mutex:
 
 static DEFINE_MUTEX(util_thres_mutex);
 
-int sched_cluster_util_thres_pct_handler(struct ctl_table *table, int write,
-					 void __user *buffer, size_t *lenp,
+int sched_cluster_util_thres_pct_handler(const struct ctl_table *table, int write,
+					 void *buffer, size_t *lenp,
 					 loff_t *ppos)
 {
 	int ret, i;
@@ -891,8 +891,8 @@ unlock_mutex:
 	return ret;
 }
 
-int sched_cluster_util_thres_pct_clust_handler(struct ctl_table *table, int write,
-					       void __user *buffer, size_t *lenp,
+int sched_cluster_util_thres_pct_clust_handler(const struct ctl_table *table, int write,
+					       void *buffer, size_t *lenp,
 					       loff_t *ppos)
 {
 	int ret;
@@ -968,8 +968,10 @@ struct ctl_table input_boost_sysctls[] = {
 		.extra2		= SYSCTL_ONE,
 	},
 #endif
-	{ }
 };
+
+const size_t input_boost_sysctls_size = ARRAY_SIZE(input_boost_sysctls);
+
 struct ctl_table walt_table[] = {
 	{
 		.procname	= "sched_user_hint",
@@ -1289,11 +1291,6 @@ struct ctl_table walt_table[] = {
 		.extra2		= &two_hundred_fifty_five,
 	},
 	{
-		.procname	= "input_boost",
-		.mode		= 0555,
-		.child		= input_boost_sysctls,
-	},
-	{
 		.procname	= "sched_wake_up_idle",
 		.data		= (int *) WAKE_UP_IDLE,
 		.maxlen		= sizeof(unsigned int) * 2,
@@ -1565,17 +1562,9 @@ struct ctl_table walt_table[] = {
 		.mode		= 0644,
 		.proc_handler	= sched_freq_map_handler,
 	},
-	{ }
 };
 
-struct ctl_table walt_base_table[] = {
-	{
-		.procname	= "walt",
-		.mode		= 0555,
-		.child		= walt_table,
-	},
-	{ },
-};
+const size_t walt_table_size = ARRAY_SIZE(walt_table);
 
 void walt_tunables(void)
 {

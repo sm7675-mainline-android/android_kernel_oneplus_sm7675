@@ -113,11 +113,6 @@ static void migrate_tasks(struct rq *dead_rq, struct rq_flags *rf)
 	 */
 	rq->stop = NULL;
 
-	/*
-	 * put_prev_task() and pick_next_task() sched
-	 * class method both need to have an up-to-date
-	 * value of rq->clock[_task]
-	 */
 	update_rq_clock(rq);
 
 #ifdef CONFIG_SCHED_DEBUG
@@ -126,20 +121,11 @@ static void migrate_tasks(struct rq *dead_rq, struct rq_flags *rf)
 #endif
 
 	for (;;) {
-		/*
-		 * There's this thread running, bail when that's the only
-		 * remaining thread:
-		 */
-		/* When ext enabled, tasks may exist in gloal rq */
-		/*if (rq->nr_running == 1)
-			break;
-		*/
-
-		next = pick_migrate_task(rq);
+		next = pick_task(rq, rf);
+		if (next == RETRY_TASK)
+			continue;
 		if (next == rq->idle)
 			break;
-
-		next = pick_migrate_task(rq);
 
 		/*
 		 * Argh ... no iterator for tasks, we need to remove the
@@ -400,16 +386,24 @@ static void update_clients(struct cpumask *cpus, bool halt, enum pause_client cl
 {
 	int cpu;
 	struct halt_cpu_state *halt_cpu_state;
+	#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
 	int *pause_client_state;
+	#endif
 
 	for_each_cpu(cpu, cpus) {
 		halt_cpu_state = per_cpu_ptr(&halt_state, cpu);
+	#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
 		pause_client_state = per_cpu_ptr(oplus_cur_pause_client, cpu);
+	#endif
 		if (halt) {
+	#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
 			pause_client_state[type] |= client;
+		#endif
 			halt_cpu_state->client_vote_mask[type] |=  client;
 		}else {
+	#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
 			pause_client_state[type] &= ~client;
+		#endif
 			halt_cpu_state->client_vote_mask[type] &= ~client;
 		}
 	}
@@ -455,9 +449,11 @@ static int walt_halt_cpus(struct cpumask *cpus, enum pause_client client, enum p
 	else
 		update_clients(&requested_cpus, true, client, type);
 
+#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
 	cpumask_copy(&cur_cpus_halt_mask, cpu_halt_mask);
 	cpumask_copy(&cur_cpus_phalt_mask, cpu_partial_halt_mask);
 	sa_corectl_systrace_c();
+#endif
 
 unlock:
 	raw_spin_unlock_irqrestore(&halt_lock, flags);
@@ -504,9 +500,11 @@ static int walt_start_cpus(struct cpumask *cpus, enum pause_client client, enum 
 		update_clients(&requested_cpus, true, client, type);
 	}
 
+#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
 	cpumask_copy(&cur_cpus_halt_mask, cpu_halt_mask);
 	cpumask_copy(&cur_cpus_phalt_mask, cpu_partial_halt_mask);
 	sa_corectl_systrace_c();
+#endif
 	raw_spin_unlock_irqrestore(&halt_lock, flags);
 
 	return ret;

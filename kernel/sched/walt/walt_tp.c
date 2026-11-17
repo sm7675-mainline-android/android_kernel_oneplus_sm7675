@@ -137,8 +137,8 @@ static void walt_unregister_dynamic_tp_events(void)
 	unregister_sched_switch_ctrs();
 }
 
-int sched_dynamic_tp_handler(struct ctl_table *table, int write,
-			void __user *buffer, size_t *lenp, loff_t *ppos)
+int sched_dynamic_tp_handler(const struct ctl_table *table, int write,
+			void *buffer, size_t *lenp, loff_t *ppos)
 {
 	static DEFINE_MUTEX(mutex);
 	int ret = 0, *val = (unsigned int *)table->data;

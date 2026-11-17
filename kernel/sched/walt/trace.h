@@ -974,7 +974,7 @@ TRACE_EVENT(walt_newidle_balance,
 		__entry->help_min_cap	= help_min_cap;
 		__entry->avg_idle	= cpu_rq(this_cpu)->avg_idle;
 		__entry->enough_idle	= enough_idle;
-		__entry->overload	= cpu_rq(this_cpu)->rd->overload;
+		__entry->overload	= cpu_rq(this_cpu)->rd->overloaded;
 		__entry->pid		= p ? p->pid : -1;
 	),
 
