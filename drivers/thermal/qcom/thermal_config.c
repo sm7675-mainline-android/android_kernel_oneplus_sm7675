@@ -31,15 +31,17 @@ int buffer_overflow_check(char *buf, int offset, int buf_size)
 static int fetch_and_populate_trip_data(char *buf, struct thermal_zone_device *tz,
 		int idx, int offset, size_t size, bool is_hyst)
 {
-	int ret = 0, temp;
+	struct thermal_trip trip;
 
-	if (!is_hyst)
-		ret = tz->ops->get_trip_temp(tz, idx, &temp);
-	else
-		ret = tz->ops->get_trip_hyst(tz, idx, &temp);
-	if (ret)
-		return ret;
-	offset += scnprintf(buf + offset, size - offset, "%d ", temp);
+	/* 6.18 replaced the get_trip_temp/get_trip_hyst ops with an in-kernel
+	 * thermal_trip array owned by the zone. */
+	if (idx < 0 || idx >= tz->num_trips)
+		return -EINVAL;
+
+	/* 6.18 exposes the zone trips as struct thermal_trip_desc entries. */
+	trip = tz->trips[idx].trip;
+	offset += scnprintf(buf + offset, size - offset, "%d ",
+			    is_hyst ? trip.hysteresis : trip.temperature);
 
 	return offset;
 }
@@ -68,9 +70,6 @@ static int fetch_and_populate_trips(char *config_buf, struct thermal_zone_device
 			goto config_exit;
 
 		buf1_offset = ret;
-
-		if (!tz->ops->get_trip_hyst)
-			continue;
 
 		ret = fetch_and_populate_trip_data(buf_hyst, tz, i, buf2_offset,
 				buf_size, true);
@@ -108,10 +107,12 @@ static int fetch_and_populate_cdevs(char *config_buf, struct thermal_zone_device
 	struct thermal_instance *instance;
 
 	mutex_lock(&tz->lock);
-	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-		if (instance->cdev)
-			buf_size++;
-	}
+	for (i = 0; i < tz->num_trips; i++)
+		list_for_each_entry(instance, &tz->trips[i].thermal_instances,
+				    trip_node) {
+			if (instance->cdev)
+				buf_size++;
+		}
 	if (!buf_size) {
 		mutex_unlock(&tz->lock);
 		return offset;
@@ -132,8 +133,9 @@ static int fetch_and_populate_cdevs(char *config_buf, struct thermal_zone_device
 		bool first_entry = true;
 		bool no_cdevs = true;
 
-		list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-			if (!instance->cdev || instance->trip != i)
+		list_for_each_entry(instance, &tz->trips[i].thermal_instances,
+				    trip_node) {
+			if (!instance->cdev)
 				continue;
 
 			no_cdevs = false;
@@ -239,7 +241,7 @@ ssize_t thermal_dbgfs_config_read(struct file *file, char __user *buf,
 	offset += scnprintf(config_buf + offset, PAGE_SIZE - offset, "%*s%d\n",
 				-15, "passive_delay",
 				jiffies_to_msecs(tz->passive_delay_jiffies));
-	if (!tz->num_trips || !tz->ops->get_trip_temp) {
+	if (!tz->num_trips) {
 		if (offset >= PAGE_SIZE) {
 			pr_err("%s sensor config rule length is more than buffer size\n",
 					tz->type);
