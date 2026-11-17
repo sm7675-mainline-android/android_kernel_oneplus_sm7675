@@ -233,6 +233,7 @@ config USB_F_QDSS
 
 config USB_F_GSI
 	tristate
+	select USB_F_RNDIS
 
 config USB_F_DIAG
 	tristate

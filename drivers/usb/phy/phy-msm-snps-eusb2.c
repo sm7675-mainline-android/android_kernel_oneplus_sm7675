@@ -937,6 +937,7 @@ static int msm_eusb2_phy_probe(struct platform_device *pdev)
 	ur = devm_usb_get_repeater_by_phandle(dev, "usb-repeater", 0);
 	if (IS_ERR(ur)) {
 		ret = PTR_ERR(ur);
+		dev_err_probe(dev, ret, "repeater lookup failed\n");
 		goto err_ret;
 	}
 
@@ -1081,6 +1082,8 @@ static int msm_eusb2_phy_probe(struct platform_device *pdev)
 		msm_eusb2_repeater_reset_and_init(phy);
 	}
 
+	dev_dbg(dev, "registered USB2 PHY repeater=%s\n",
+		 dev_name(ur->dev));
 	return 0;
 
 err_ret:

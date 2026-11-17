@@ -56,7 +56,7 @@
 #include "xhci.h"
 #include "debug-ipc.h"
 
-#define NUM_LOG_PAGES   12
+#define NUM_LOG_PAGES   8
 
 /* dload specific suppot */
 #define PID_MAGIC_ID		0x71432909
@@ -1218,9 +1218,9 @@ static int dwc3_core_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned int cmd,
 			dwc3_msm_write_reg(mdwc->base, DWC3_GUSB2PHYCFG(0), reg);
 	}
 
-	dwc3_msm_ep_writel(dep->regs, DWC3_DEPCMDPAR0, params->param0);
-	dwc3_msm_ep_writel(dep->regs, DWC3_DEPCMDPAR1, params->param1);
-	dwc3_msm_ep_writel(dep->regs, DWC3_DEPCMDPAR2, params->param2);
+	dwc3_msm_write_reg(mdwc->base, DWC3_DEPCMDPAR0(dep->number), params->param0);
+	dwc3_msm_write_reg(mdwc->base, DWC3_DEPCMDPAR1(dep->number), params->param1);
+	dwc3_msm_write_reg(mdwc->base, DWC3_DEPCMDPAR2(dep->number), params->param2);
 
 	/*
 	 * Synopsys Databook 2.60a states in section 6.3.2.5.6 of that if we're
@@ -1243,9 +1243,9 @@ static int dwc3_core_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned int cmd,
 	else
 		cmd |= DWC3_DEPCMD_CMDACT;
 
-	dwc3_msm_ep_writel(dep->regs, DWC3_DEPCMD, cmd);
+	dwc3_msm_write_reg(mdwc->base, DWC3_DEPCMD(dep->number), cmd);
 	do {
-		reg = dwc3_msm_ep_readl(dep->regs, DWC3_DEPCMD);
+		reg = dwc3_msm_read_reg(mdwc->base, DWC3_DEPCMD(dep->number));
 		if (!(reg & DWC3_DEPCMD_CMDACT)) {
 			cmd_status = DWC3_DEPCMD_STATUS(reg);
 
@@ -1293,7 +1293,7 @@ static int dwc3_core_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned int cmd,
 		if (ret != -ETIMEDOUT) {
 			u32 res_id;
 
-			res_id = dwc3_msm_ep_readl(dep->regs, DWC3_DEPCMD);
+			res_id = dwc3_msm_read_reg(mdwc->base, DWC3_DEPCMD(dep->number));
 			dep->resource_index = DWC3_DEPCMD_GET_RSC_IDX(res_id);
 		}
 	}
@@ -2024,7 +2024,7 @@ static void gsi_get_channel_info(struct usb_ep *ep,
 
 	/* Provide physical USB addresses for DEPCMD and GEVENTCNT registers */
 	ch_info->depcmd_low_addr = (u32)(mdwc->reg_phys +
-				DWC3_DEP_BASE(dep->number) + DWC3_DEPCMD);
+				DWC3_DEPCMD(dep->number));
 
 	ch_info->depcmd_hi_addr = 0;
 
@@ -5184,6 +5184,9 @@ static int dwc3_msm_set_role(struct dwc3_msm *mdwc, enum usb_role role)
 
 	mutex_lock(&mdwc->role_switch_mutex);
 	cur_role = dwc3_msm_get_role(mdwc);
+	dev_dbg(mdwc->dev, "role request old=%s new=%s state=%s\n",
+		 dwc3_msm_usb_role_string(cur_role), dwc3_msm_usb_role_string(role),
+		 dwc3_drd_state_string(mdwc->drd_state));
 
 	dbg_log_string("cur_role:%s new_role:%s refcnt:%d\n", dwc3_msm_usb_role_string(cur_role),
 				dwc3_msm_usb_role_string(role), mdwc->refcnt_dp_usb);
@@ -5845,14 +5848,14 @@ static void dwc3_msm_debug_init(struct dwc3_msm *mdwc)
 
 	snprintf(ipc_log_ctx_name, sizeof(ipc_log_ctx_name),
 				"%s.ep_events", dev_name(mdwc->dev));
-	mdwc->dwc_dma_ipc_log_ctxt = ipc_log_context_create(2 * NUM_LOG_PAGES,
+	mdwc->dwc_dma_ipc_log_ctxt = ipc_log_context_create(NUM_LOG_PAGES,
 					ipc_log_ctx_name, 0);
 	if (!mdwc->dwc_dma_ipc_log_ctxt)
 		dev_err(mdwc->dev, "Error getting ipc_log_ctxt for ep_events\n");
 
 	snprintf(ipc_log_ctx_name, sizeof(ipc_log_ctx_name),
 				"%s.trace", dev_name(mdwc->dev));
-	dwc_trace_ipc_log_ctxt = ipc_log_context_create(3 * NUM_LOG_PAGES,
+	dwc_trace_ipc_log_ctxt = ipc_log_context_create(NUM_LOG_PAGES,
 					ipc_log_ctx_name, 0);
 	if (!dwc_trace_ipc_log_ctxt)
 		dev_err(mdwc->dev, "Error getting trace_ipc_log_ctxt for ep_events\n");
@@ -5916,9 +5919,9 @@ static int dwc3_msm_core_init(struct dwc3_msm *mdwc)
 		}
 	}
 
-	/* Assumes dwc3 is the first DT child of dwc3-msm */
-	dwc3_node = of_get_next_available_child(node, NULL);
-	if (!dwc3_node) {
+	dwc3_node = of_get_compatible_child(node, "snps,dwc3");
+	if (!of_device_is_available(dwc3_node)) {
+		of_node_put(dwc3_node);
 		dev_err(mdwc->dev, "failed to find dwc3 child\n");
 		ret = -ENODEV;
 		goto err;
@@ -5942,7 +5945,10 @@ static int dwc3_msm_core_init(struct dwc3_msm *mdwc)
 
 	dwc = platform_get_drvdata(mdwc->dwc3);
 	if (!dwc) {
-		dev_err(mdwc->dev, "Failed to get dwc3 device\n");
+		dev_err(mdwc->dev, "core not ready child=%s driver=%s\n",
+			dev_name(&mdwc->dwc3->dev),
+			mdwc->dwc3->dev.driver ? mdwc->dwc3->dev.driver->name : "none");
+		put_device(&mdwc->dwc3->dev);
 		mdwc->dwc3 = NULL;
 		ret = -ENODEV;
 		goto depopulate;
@@ -5997,6 +6003,8 @@ static int dwc3_msm_core_init(struct dwc3_msm *mdwc)
 	dwc3_msm_notify_event(dwc, DWC3_GSI_EVT_BUF_ALLOC, 0);
 	pm_runtime_set_autosuspend_delay(dwc->dev, 0);
 	pm_runtime_allow(dwc->dev);
+	dev_dbg(mdwc->dev, "core ready child=%s mode=%u gadget=%u\n",
+		 dev_name(dwc->dev), dwc->dr_mode, !!dwc->gadget);
 
 	return 0;
 
@@ -6046,19 +6054,23 @@ static int dwc3_msm_parse_core_params(struct dwc3_msm *mdwc, struct device_node 
 
 	phy_node = of_parse_phandle(dwc3_node, "usb-phy", 0);
 	mdwc->hs_phy = devm_usb_get_phy_by_node(mdwc->dev, phy_node, NULL);
+	of_node_put(phy_node);
 	if (IS_ERR(mdwc->hs_phy)) {
-		dev_err(mdwc->dev, "unable to get hsphy device\n");
 		ret = PTR_ERR(mdwc->hs_phy);
-		return ret;
+		return dev_err_probe(mdwc->dev, ret,
+				     "HS PHY lookup failed\n");
 	}
 
 	phy_node = of_parse_phandle(dwc3_node, "usb-phy", 1);
 	mdwc->ss_phy = devm_usb_get_phy_by_node(mdwc->dev, phy_node, NULL);
+	of_node_put(phy_node);
 	if (IS_ERR(mdwc->ss_phy)) {
-		dev_err(mdwc->dev, "unable to get ssphy device\n");
 		ret = PTR_ERR(mdwc->ss_phy);
-		return ret;
+		return dev_err_probe(mdwc->dev, ret,
+				     "SS PHY lookup failed\n");
 	}
+	dev_dbg(mdwc->dev, "PHYs ready hs=%s ss=%s\n",
+		 dev_name(mdwc->hs_phy->dev), dev_name(mdwc->ss_phy->dev));
 
 	/* Populate USB repeater version for TD 9.23 WA */
 	dwc3_msm_get_repeater_ver(mdwc);
@@ -6411,9 +6423,9 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 		}
 	}
 
-	/* Assumes dwc3 is the first DT child of dwc3-msm */
-	dwc3_node = of_get_next_available_child(node, NULL);
-	if (!dwc3_node) {
+	dwc3_node = of_get_compatible_child(node, "snps,dwc3");
+	if (!of_device_is_available(dwc3_node)) {
+		of_node_put(dwc3_node);
 		dev_err(&pdev->dev, "failed to find dwc3 child\n");
 		ret = -ENODEV;
 		goto err;
@@ -7306,6 +7318,8 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 	}
 
 	state = dwc3_drd_state_string(mdwc->drd_state);
+	dev_dbg(mdwc->dev, "state=%s id=%u vbus=%u core=%u\n",
+			    state, mdwc->id_state, mdwc->vbus_active, !!dwc);
 #ifndef OPLUS_FEATURE_CHG_BASIC
 	dev_dbg(mdwc->dev, "%s state\n", state);
 #else
@@ -7332,6 +7346,7 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 		ret = dwc3_msm_core_init(mdwc);
 		if (ret) {
 			dbg_event(0xFF, "core_init failed", ret);
+			dev_err_ratelimited(mdwc->dev, "core init failed rc=%d\n", ret);
 			pm_runtime_put_sync_suspend(mdwc->dev);
 			pm_runtime_disable(mdwc->dev);
 			work = true;

@@ -736,6 +736,7 @@ static int eusb2_repeater_probe(struct platform_device *pdev)
 #endif
 
 	eusb2_repeater_create_debugfs(er);
+	dev_dbg(dev, "registered eUSB2 repeater\n");
 	return 0;
 
 err_probe:
