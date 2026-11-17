@@ -25,7 +25,7 @@ TRACE_EVENT(qcom_dma_alloc,
         TP_fast_assign(
                 __entry->len = len;
                 __entry->ino = ino;
-                __assign_str(name, name);
+                __assign_str(name);
         ),
         TP_printk(
                 "len=%zu, inode=%lu, name=%s",
@@ -46,7 +46,7 @@ TRACE_EVENT(qcom_dma_free,
         TP_fast_assign(
                 __entry->len = len;
                 __entry->ino = ino;
-                __assign_str(name, name);
+                __assign_str(name);
         ),
         TP_printk(
                 "len=%zu, inode=%lu, name=%s",

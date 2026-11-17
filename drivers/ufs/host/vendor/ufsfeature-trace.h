@@ -82,7 +82,7 @@ TRACE_EVENT(ufsfeature_command,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->str_t = str_t;
 		__entry->tag = tag;
 		__entry->doorbell = doorbell;
@@ -118,7 +118,7 @@ TRACE_EVENT(ufsfeature_upiu,
 	),
 
 	TP_fast_assign(
-		__assign_str(dev_name, dev_name);
+		__assign_str(dev_name);
 		__entry->str_t = str_t;
 		memcpy(__entry->hdr, hdr, sizeof(__entry->hdr));
 		memcpy(__entry->tsf, tsf, sizeof(__entry->tsf));

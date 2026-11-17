@@ -32,8 +32,8 @@ TRACE_EVENT(hclge_pf_mbx_get,
 		__entry->vfid = req->mbx_src_vfid;
 		__entry->code = req->msg.code;
 		__entry->subcode = req->msg.subcode;
-		__assign_str(pciname, pci_name(hdev->pdev));
-		__assign_str(devname, hdev->vport[0].nic.kinfo.netdev->name);
+		__assign_str(pciname);
+		__assign_str(devname);
 		memcpy(__entry->mbx_data, req,
 		       sizeof(struct hclge_mbx_vf_to_pf_cmd));
 	),
@@ -63,8 +63,8 @@ TRACE_EVENT(hclge_pf_mbx_send,
 	TP_fast_assign(
 		__entry->vfid = req->dest_vfid;
 		__entry->code = le16_to_cpu(req->msg.code);
-		__assign_str(pciname, pci_name(hdev->pdev));
-		__assign_str(devname, hdev->vport[0].nic.kinfo.netdev->name);
+		__assign_str(pciname);
+		__assign_str(devname);
 		memcpy(__entry->mbx_data, req,
 		       sizeof(struct hclge_mbx_pf_to_vf_cmd));
 	),
