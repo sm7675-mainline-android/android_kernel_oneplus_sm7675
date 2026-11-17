@@ -26,7 +26,11 @@
 #include "remoteproc_internal.h"
 #include "qcom_common.h"
 
+#ifdef CONFIG_RPROC_SSR_NOTIF_TIMEOUT
 #define SSR_NOTIF_TIMEOUT CONFIG_RPROC_SSR_NOTIF_TIMEOUT
+#else
+#define SSR_NOTIF_TIMEOUT 5000
+#endif
 
 #define to_glink_subdev(d) container_of(d, struct qcom_rproc_glink, subdev)
 #define to_smd_subdev(d) container_of(d, struct qcom_rproc_subdev, subdev)

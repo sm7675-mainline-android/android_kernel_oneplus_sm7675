@@ -2162,7 +2162,7 @@ static int qcom_glink_rx_open(struct qcom_glink *glink, unsigned int rcid,
 	unsigned long flags;
 
 	spin_lock_irqsave(&glink->idr_lock, flags);
-	idr_for_each_entry(&glink->rcids, channel, cid) {
+	idr_for_each_entry(&glink->lcids, channel, cid) {
 		if (!strcmp(channel->name, name))
 			break;
 	}
@@ -2310,6 +2310,7 @@ static void qcom_glink_work(struct work_struct *work)
 	unsigned int param1;
 	unsigned int param2;
 	unsigned int cmd;
+	int ret;
 
 	for (;;) {
 		spin_lock_irqsave(&glink->rx_lock, flags);
@@ -2335,7 +2336,11 @@ static void qcom_glink_work(struct work_struct *work)
 			qcom_glink_receive_version_ack(glink, param1, param2);
 			break;
 		case GLINK_CMD_OPEN:
-			qcom_glink_rx_open(glink, param1, msg->data);
+			ret = qcom_glink_rx_open(glink, param1, msg->data);
+			if (ret)
+				dev_err_ratelimited(glink->dev,
+						    "Failed to open channel %s: %d\n",
+						    msg->data, ret);
 			break;
 		case GLINK_CMD_CLOSE:
 			qcom_glink_rx_close(glink, param1);

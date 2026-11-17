@@ -39,7 +39,7 @@
 #include <asm/arch_timer.h>
 #include <linux/jiffies.h>
 #include <linux/suspend.h>
-#include <../../remoteproc/qcom_common.h>
+#include "../../remoteproc/qcom_common.h"
 #include <uapi/misc/adsp_sleepmon.h>
 
 #define ADSPSLEEPMON_SMEM_ADSP_PID                              2
@@ -1752,7 +1752,7 @@ static int adspsleepmon_driver_probe(struct platform_device *pdev)
 		goto cdev_bail;
 	}
 
-	me->class = class_create(THIS_MODULE, "adspsleepmon");
+	me->class = class_create("adspsleepmon");
 
 	if (IS_ERR(me->class)) {
 		dev_err(dev, "Failed to create a class\n");

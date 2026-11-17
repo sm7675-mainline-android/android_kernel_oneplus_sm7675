@@ -8,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/netlink.h>
 #include <linux/qrtr.h>
+#include <linux/version.h>
 #include <linux/termios.h>	/* For TIOCINQ/OUTQ */
 #include <linux/spinlock.h>
 #include <linux/wait.h>
@@ -2355,7 +2356,9 @@ static const struct proto_ops qrtr_proto_ops = {
 	.shutdown	= sock_no_shutdown,
 	.release	= qrtr_release,
 	.mmap		= sock_no_mmap,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 	.sendpage	= sock_no_sendpage,
+#endif
 };
 
 static struct proto qrtr_proto = {

@@ -36,8 +36,8 @@
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_FEEDBACK)
 #include <soc/oplus/system/oplus_mm_kevent_fb.h>
-#define REMOTEPROC_ADSP "remoteproc-adsp"
 #endif /* CONFIG_OPLUS_FEATURE_MM_FEEDBACK */
+#define REMOTEPROC_ADSP "remoteproc-adsp"
 
 #ifdef OPLUS_FEATURE_MODEM_MINIDUMP
 #define MAX_REASON_LEN 300
@@ -389,8 +389,9 @@ static irqreturn_t q6v5_wdog_interrupt(int irq, void *data)
 static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 {
 	struct qcom_q6v5 *q6v5 = data;
-	size_t len;
+	size_t len = 0;
 	char *msg;
+	char crash_reason[256] = "unknown";
 
 	#ifdef OPLUS_FEATURE_MODEM_MINIDUMP
 	char reason[MAX_MODEM_SSR_REASON_LEN];
@@ -406,10 +407,20 @@ static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 		"enabled and kick recovery process");
 
 	msg = qcom_smem_get(QCOM_SMEM_HOST_ANY, q6v5->crash_reason, &len);
-	if (!IS_ERR(msg) && len > 0 && msg[0])
-		dev_err(q6v5->dev, "fatal error received: %s\n", msg);
-	else
+	if (!IS_ERR(msg) && len > 0 && msg[0]) {
+		scnprintf(crash_reason, sizeof(crash_reason), "%.*s",
+			  (int)min_t(size_t, len, sizeof(crash_reason) - 1), msg);
+		dev_err(q6v5->dev, "fatal error received: %s\n", crash_reason);
+	} else {
 		dev_err(q6v5->dev, "fatal error without message\n");
+	}
+
+	dev_err(q6v5->dev,
+		"fatal start_completion=%u handover=%u running=%u state=%u power=%d smem=%d len=%zu\n",
+		completion_done(&q6v5->start_done), q6v5->handover_issued,
+		q6v5->running, q6v5->rproc->state,
+		atomic_read(&q6v5->rproc->power), q6v5->crash_reason,
+		IS_ERR(msg) ? 0 : len);
 
 	q6v5->running = false;
 
@@ -417,7 +428,8 @@ static irqreturn_t q6v5_fatal_interrupt(int irq, void *data)
 		qcom_notify_early_ssr_clients(q6v5->ssr_subdev);
 
 	if (q6v5->rproc->recovery_disabled)
-		panic("Panicking, remoteproc %s crashed reason: %s\n", q6v5->rproc->name, msg);
+		panic("Panicking, remoteproc %s crashed reason: %s\n",
+		      q6v5->rproc->name, crash_reason);
 	else
 		rproc_report_crash(q6v5->rproc, RPROC_FATAL_ERROR);
 

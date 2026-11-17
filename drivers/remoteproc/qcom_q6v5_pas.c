@@ -22,7 +22,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
-#include <linux/qcom_scm.h>
+#include <linux/firmware/qcom/qcom_scm.h>
 #include <linux/regulator/consumer.h>
 #include <linux/remoteproc.h>
 #include <linux/interconnect.h>
@@ -188,8 +188,8 @@ struct qcom_adsp {
 	int pas_id;
 	int dtb_pas_id;
 	const char *dtb_fw_name;
-	struct qcom_mdt_metadata *mdata;
-	struct qcom_mdt_metadata dtb_mdata;
+	struct qcom_scm_pas_metadata *mdata;
+	struct qcom_scm_pas_metadata dtb_mdata;
 	unsigned int minidump_id;
 	bool both_dumps;
 	bool retry_shutdown;
@@ -608,7 +608,7 @@ static int scm_pas_enable_bw(void)
 	int ret = 0;
 
 	if (IS_ERR(scm_perf_client))
-		return -EINVAL;
+		return PTR_ERR(scm_perf_client);
 
 	mutex_lock(&q6v5_pas_mutex);
 	if (!scm_pas_bw_count) {
@@ -689,7 +689,9 @@ static int adsp_load(struct rproc *rproc, const struct firmware *fw)
 
 	rproc_coredump_cleanup(adsp->rproc);
 
-	scm_pas_enable_bw();
+	ret = scm_pas_enable_bw();
+	if (ret)
+		return ret;
 
 	if (!adsp->dtb_pas_id || !adsp->dtb_fw_name) {
 		scm_pas_disable_bw();
@@ -702,10 +704,15 @@ static int adsp_load(struct rproc *rproc, const struct firmware *fw)
 		goto exit;
 	}
 
-	ret = qcom_mdt_load_no_free(adsp->dev, adsp->dtb_firmware, adsp->dtb_fw_name,
-				adsp->dtb_pas_id, adsp->dtb_mem_region, adsp->dtb_mem_phys,
-				adsp->dtb_mem_size, &adsp->dtb_mem_reloc, adsp->dma_phys_below_32b,
-				&adsp->dtb_mdata);
+	ret = qcom_mdt_pas_init(adsp->dev, adsp->dtb_firmware, adsp->dtb_fw_name,
+				adsp->dtb_pas_id, adsp->dtb_mem_phys, &adsp->dtb_mdata);
+	if (!ret)
+		ret = qcom_mdt_load_no_init(adsp->dev, adsp->dtb_firmware,
+					adsp->dtb_fw_name, adsp->dtb_mem_region,
+					adsp->dtb_mem_phys, adsp->dtb_mem_size,
+					&adsp->dtb_mem_reloc);
+	if (ret)
+		qcom_scm_pas_metadata_release(&adsp->dtb_mdata);
 	if (ret) {
 		dev_err(adsp->dev, "failed to load %s: %d\n", adsp->dtb_fw_name, ret);
 		release_firmware(adsp->dtb_firmware);
@@ -758,10 +765,8 @@ static int do_bus_scaling(struct qcom_adsp *adsp, bool enable)
 	u32 peak_bw = enable ? PIL_TZ_PEAK_BW : 0;
 
 	if (IS_ERR(adsp->bus_client))
-		dev_err(adsp->dev, "Bus scaling not setup for %s\n",
-			adsp->rproc->name);
-	else
-		rc = icc_set_bw(adsp->bus_client, avg_bw, peak_bw);
+		return PTR_ERR(adsp->bus_client);
+	rc = icc_set_bw(adsp->bus_client, avg_bw, peak_bw);
 
 	if (rc)
 		dev_err(adsp->dev, "bandwidth request failed(rc:%d)\n", rc);
@@ -986,6 +991,7 @@ static int adsp_start(struct rproc *rproc)
 	struct qcom_adsp *adsp = (struct qcom_adsp *)rproc->priv;
 	int i, ret;
 	const struct firmware *fw = NULL;
+	const char *stage = "prepare";
 
 	trace_rproc_qcom_event(dev_name(adsp->dev), "adsp_start", "enter");
 
@@ -1032,9 +1038,19 @@ static int adsp_start(struct rproc *rproc)
 	if (ret)
 		goto disable_aggre2_clk;
 
-	scm_pas_enable_bw();
+	stage = "crypto-bandwidth";
+	ret = scm_pas_enable_bw();
+	if (ret)
+		goto disable_regs;
+	dev_dbg(adsp->dev,
+		 "start fw=%s dtb=%s mem=%pa+%zx dtb_mem=%pa+%zx rproc_icc=%u crypto_icc=%u qmp=%u regs=%d\n",
+		 rproc->firmware, adsp->dtb_fw_name ?: "none",
+		 &adsp->mem_phys, adsp->mem_size,
+		 &adsp->dtb_mem_phys, adsp->dtb_mem_size,
+		 !!adsp->bus_client, !!scm_perf_client, !!adsp->qmp, adsp->reg_cnt);
 	trace_rproc_qcom_event(dev_name(adsp->dev), "dtb_auth_reset", "enter");
 	if (adsp->dtb_pas_id || adsp->dtb_fw_name) {
+		stage = "dtb-auth-reset";
 		ret = qcom_scm_pas_auth_and_reset(adsp->dtb_pas_id);
 		if (ret)
 			panic("Panicking, auth and reset failed for remoteproc %s dtb ret=%d\n",
@@ -1042,21 +1058,29 @@ static int adsp_start(struct rproc *rproc)
 	}
 
 	trace_rproc_qcom_event(dev_name(adsp->dev), "Q6_firmware_loading", "enter");
+	stage = "firmware-request";
 	ret = request_firmware(&fw, rproc->firmware, adsp->dev);
 	if (ret)
 		goto free_metadata_dtb;
 
-	ret = qcom_mdt_load_no_free(adsp->dev, fw, rproc->firmware, adsp->pas_id,
-				    adsp->mem_region, adsp->mem_phys, adsp->mem_size,
-				    &adsp->mem_reloc, adsp->dma_phys_below_32b, adsp->mdata);
+	stage = "pas-init";
+	ret = qcom_mdt_pas_init(adsp->dev, fw, rproc->firmware, adsp->pas_id,
+				adsp->mem_phys, adsp->mdata);
+	if (!ret) {
+		stage = "segment-load";
+		ret = qcom_mdt_load_no_init(adsp->dev, fw, rproc->firmware,
+					adsp->mem_region, adsp->mem_phys, adsp->mem_size,
+					&adsp->mem_reloc);
+	}
 	if (ret)
-		goto free_firmware;
+		goto free_metadata;
 
 	qcom_pil_info_store(adsp->info_name, adsp->mem_phys, adsp->mem_size);
 
 	adsp_add_coredump_segments(adsp, fw);
 	trace_rproc_qcom_event(dev_name(adsp->dev), "Q6_auth_reset", "enter");
 
+	stage = "auth-reset";
 	ret = qcom_scm_pas_auth_and_reset(adsp->pas_id);
 	if (ret)
 		panic("Panicking, auth and reset failed for remoteproc %s ret=%d\n",
@@ -1065,6 +1089,7 @@ static int adsp_start(struct rproc *rproc)
 
 	/* if needed, signal Q6 to continute booting */
 	if (adsp->q6v5.rmb_base) {
+		stage = "rmb-wait";
 		for (i = 0; i < RMB_POLL_MAX_TIMES || timeout_disabled; i++) {
 			if (readl_relaxed(adsp->q6v5.rmb_base + RMB_BOOT_WAIT_REG)) {
 				writel_relaxed(1, adsp->q6v5.rmb_base + RMB_BOOT_CONT_REG);
@@ -1075,29 +1100,31 @@ static int adsp_start(struct rproc *rproc)
 
 		if (!readl_relaxed(adsp->q6v5.rmb_base + RMB_BOOT_WAIT_REG)) {
 			dev_err(adsp->dev, "Didn't get rmb signal from  %s\n", rproc->name);
+			ret = -ETIMEDOUT;
 			goto free_metadata;
 		}
 	}
 
 	if (!timeout_disabled) {
+		stage = "start-wait";
 		ret = qcom_q6v5_wait_for_start(&adsp->q6v5, msecs_to_jiffies(5000));
 		if (rproc->recovery_disabled && ret)
 			panic("Panicking, remoteproc %s failed to bootup.\n", adsp->rproc->name);
 		else if (ret == -ETIMEDOUT)
 			dev_err(adsp->dev, "start timed out\n");
 	}
+	if (!ret)
+		stage = timeout_disabled ? "wait-disabled" : "started";
 
 free_metadata:
-	qcom_mdt_free_metadata(adsp->dev, adsp->pas_id, adsp->mdata,
-					adsp->dma_phys_below_32b, ret);
-free_firmware:
+	if (adsp->mdata)
+		qcom_scm_pas_metadata_release(adsp->mdata);
 	if (fw)
 		release_firmware(fw);
 
 free_metadata_dtb:
 	if (adsp->dtb_pas_id || adsp->dtb_fw_name) {
-		qcom_mdt_free_metadata(adsp->dev, adsp->dtb_pas_id,
-					&adsp->dtb_mdata, adsp->dma_phys_below_32b, ret);
+		qcom_scm_pas_metadata_release(&adsp->dtb_mdata);
 		release_firmware(adsp->dtb_firmware);
 	}
 
@@ -1105,6 +1132,7 @@ free_metadata_dtb:
 	if (!ret)
 		goto exit;
 
+disable_regs:
 	disable_regulators(adsp);
 disable_aggre2_clk:
 	clk_disable_unprepare(adsp->aggre2_clk);
@@ -1122,6 +1150,8 @@ unscale_bus:
 disable_irqs:
 	qcom_q6v5_unprepare(&adsp->q6v5);
 exit:
+	dev_dbg(adsp->dev, "fw=%s pas=%u stage=%s rc=%d retained=%u\n",
+		 rproc->firmware, adsp->pas_id, stage, ret, !!adsp->mdata);
 	trace_rproc_qcom_event(dev_name(adsp->dev), "adsp_start", "exit");
 	return ret;
 }
@@ -1347,6 +1377,8 @@ static void qcom_pas_handover(struct qcom_q6v5 *q6v5)
 	struct qcom_adsp *adsp = container_of(q6v5, struct qcom_adsp, q6v5);
 	int ret;
 
+	dev_dbg(adsp->dev, "handover ready=%u running=%u\n",
+		 completion_done(&q6v5->start_done), q6v5->running);
 	if (adsp->check_status) {
 		ret = rproc_config_check(adsp, SOCCP_D3);
 		if (ret)
@@ -1358,7 +1390,8 @@ static void qcom_pas_handover(struct qcom_q6v5 *q6v5)
 	clk_disable_unprepare(adsp->aggre2_clk);
 	clk_disable_unprepare(adsp->xo);
 	adsp_pds_disable(adsp, adsp->proxy_pds, adsp->proxy_pd_count);
-	do_bus_scaling(adsp, false);
+	ret = do_bus_scaling(adsp, false);
+	dev_dbg(adsp->dev, "handover released proxy resources icc_rc=%d\n", ret);
 }
 
 static int adsp_stop(struct rproc *rproc)
@@ -1370,10 +1403,14 @@ static int adsp_stop(struct rproc *rproc)
 	trace_rproc_qcom_event(dev_name(adsp->dev), "adsp_stop", "enter");
 
 	ret = qcom_q6v5_request_stop(&adsp->q6v5, adsp->sysmon);
+	dev_dbg(adsp->dev, "PAS shutdown stop-ack rc=%d pas=%u retry=%u\n",
+		 ret, adsp->pas_id, adsp->retry_shutdown);
 	if (ret == -ETIMEDOUT)
 		dev_err(adsp->dev, "timed out on wait\n");
 
-	scm_pas_enable_bw();
+	ret = scm_pas_enable_bw();
+	if (ret)
+		return ret;
 	if (adsp->retry_shutdown)
 		ret = qcom_scm_pas_shutdown_retry(adsp->pas_id);
 	else
@@ -1383,7 +1420,8 @@ static int adsp_stop(struct rproc *rproc)
 		ret = adsp_shutdown_poll_decrypt(adsp);
 
 	if (ret)
-		panic("Panicking, remoteproc %s failed to shutdown.\n", rproc->name);
+		panic("Panicking, remoteproc %s failed to shutdown pas=%u rc=%d retry=%u\n",
+		      rproc->name, adsp->pas_id, ret, adsp->retry_shutdown);
 
 	if (adsp->dtb_pas_id) {
 		ret = qcom_scm_pas_shutdown(adsp->dtb_pas_id);
@@ -1637,19 +1675,30 @@ static int adsp_init_regulator(struct qcom_adsp *adsp)
 	return 0;
 }
 
-static void adsp_init_bus_scaling(struct qcom_adsp *adsp)
+static int adsp_init_bus_scaling(struct qcom_adsp *adsp)
 {
-	if (scm_perf_client)
-		goto get_rproc_client;
+	struct icc_path *path;
+	int ret = 0;
 
-	scm_perf_client = of_icc_get(adsp->dev, "crypto_ddr");
-	if (IS_ERR(scm_perf_client))
-		dev_warn(adsp->dev, "Crypto scaling not setup\n");
-
-get_rproc_client:
-	adsp->bus_client = of_icc_get(adsp->dev, "rproc_ddr");
+	adsp->bus_client = devm_of_icc_get(adsp->dev, "rproc_ddr");
 	if (IS_ERR(adsp->bus_client))
-		dev_warn(adsp->dev, "%s: No bus client\n", __func__);
+		return dev_err_probe(adsp->dev, PTR_ERR(adsp->bus_client),
+				     "rproc_ddr path unavailable\n");
+
+	mutex_lock(&q6v5_pas_mutex);
+	if (!scm_perf_client) {
+		path = of_icc_get(adsp->dev, "crypto_ddr");
+		if (IS_ERR(path))
+			ret = PTR_ERR(path);
+		else
+			scm_perf_client = path;
+	}
+	mutex_unlock(&q6v5_pas_mutex);
+	if (ret)
+		return dev_err_probe(adsp->dev, ret,
+				     "crypto_ddr path unavailable\n");
+
+	return 0;
 }
 
 static int adsp_pds_attach(struct device *dev, struct device **devs,
@@ -1941,7 +1990,11 @@ static int adsp_probe(struct platform_device *pdev)
 	adsp->check_status = desc->check_status;
 
 	if (desc->free_after_auth_reset) {
-		adsp->mdata = devm_kzalloc(adsp->dev, sizeof(struct qcom_mdt_metadata), GFP_KERNEL);
+		adsp->mdata = devm_kzalloc(adsp->dev, sizeof(*adsp->mdata), GFP_KERNEL);
+		if (!adsp->mdata) {
+			ret = -ENOMEM;
+			goto free_dtb_firmware;
+		}
 		adsp->retry_shutdown = true;
 	}
 
@@ -1976,7 +2029,9 @@ static int adsp_probe(struct platform_device *pdev)
 	if (ret)
 		goto deinit_wakeup_source;
 
-	adsp_init_bus_scaling(adsp);
+	ret = adsp_init_bus_scaling(adsp);
+	if (ret)
+		goto deinit_wakeup_source;
 
 	ret = adsp_pds_attach(&pdev->dev, adsp->active_pds,
 			      desc->active_pd_names);
