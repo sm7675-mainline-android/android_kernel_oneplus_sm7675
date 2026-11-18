@@ -147,6 +147,7 @@ struct adsp_data {
 	bool both_dumps;
 	bool uses_elf64;
 	bool auto_boot;
+	bool recovery_enabled;
 	bool dma_phys_below_32b;
 	bool decrypt_shutdown;
 	bool hyp_assign_mem;
@@ -1965,7 +1966,7 @@ static int adsp_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	rproc->recovery_disabled = true;
+	rproc->recovery_disabled = !desc->recovery_enabled;
 	rproc->auto_boot = desc->auto_boot;
 	if (desc->uses_elf64)
 		rproc_coredump_set_elf_info(rproc, ELFCLASS64, EM_NONE);
@@ -1986,7 +1987,10 @@ static int adsp_probe(struct platform_device *pdev)
 	adsp->qmp_name = desc->qmp_name;
 	adsp->dma_phys_below_32b = desc->dma_phys_below_32b;
 	adsp->both_dumps = desc->both_dumps;
-	adsp->subsys_recovery_disabled = true;
+	adsp->subsys_recovery_disabled = rproc->recovery_disabled;
+	if (desc->recovery_enabled)
+		dev_info(adsp->dev, "subsystem recovery enabled for %s (%s)\n",
+			 desc->ssr_name, fw_name);
 	adsp->check_status = desc->check_status;
 
 	if (desc->free_after_auth_reset) {
@@ -2768,6 +2772,7 @@ static const struct adsp_data cliffs_mpss_resource = {
 	.minidump_id = 3,
 	.uses_elf64 = true,
 	.auto_boot = false,
+	.recovery_enabled = true,
 	.ssr_hyp_assign_mem = true,
 	.ssr_name = "mpss",
 	.sysmon_name = "modem",
