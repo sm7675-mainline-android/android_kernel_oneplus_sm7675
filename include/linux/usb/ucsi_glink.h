@@ -15,7 +15,7 @@ struct ucsi_glink_constat_info {
 
 struct notifier_block;
 
-#if IS_ENABLED(CONFIG_UCSI_QTI_GLINK)
+#if IS_ENABLED(CONFIG_UCSI_QTI_GLINK) || IS_ENABLED(CONFIG_UCSI_PMIC_GLINK)
 
 int register_ucsi_glink_notifier(struct notifier_block *nb);
 int unregister_ucsi_glink_notifier(struct notifier_block *nb);

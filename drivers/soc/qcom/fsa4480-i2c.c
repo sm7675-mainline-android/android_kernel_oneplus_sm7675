@@ -1132,6 +1132,9 @@ static int fsa4480_probe(struct i2c_client *i2c)
 
 	memset(fsa_priv, 0, sizeof(struct fsa4480_priv));
 	fsa_priv->dev = &i2c->dev;
+	mutex_init(&fsa_priv->notification_lock);
+	INIT_WORK(&fsa_priv->usbc_analog_work, fsa4480_usbc_analog_work_fn);
+	BLOCKING_INIT_NOTIFIER_HEAD(&fsa_priv->fsa4480_notifier);
 
 	#ifdef OPLUS_ARCH_EXTENDS
 	/* Add for fsa4480 headset detection interrupt */
@@ -1304,13 +1307,7 @@ tcp_register_finish:
 		}
 	}
 #endif /* OPLUS_ARCH_EXTENDS */
-	mutex_init(&fsa_priv->notification_lock);
 	i2c_set_clientdata(i2c, fsa_priv);
-
-	INIT_WORK(&fsa_priv->usbc_analog_work,
-		  fsa4480_usbc_analog_work_fn);
-
-	BLOCKING_INIT_NOTIFIER_HEAD(&fsa_priv->fsa4480_notifier);
 
 	#ifdef OPLUS_ARCH_EXTENDS
 	/* Add for log */
@@ -1322,6 +1319,9 @@ tcp_register_finish:
 err_supply:
 	power_supply_put(fsa_priv->usb_psy);
 err_data:
+	cancel_work_sync(&fsa_priv->usbc_analog_work);
+	pm_relax(fsa_priv->dev);
+	mutex_destroy(&fsa_priv->notification_lock);
 	#ifdef OPLUS_ARCH_EXTENDS
 	/* Add for log */
 	pr_err("%s: finished since err\n", __func__);
