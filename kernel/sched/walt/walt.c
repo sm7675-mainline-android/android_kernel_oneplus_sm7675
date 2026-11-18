@@ -5093,7 +5093,7 @@ static void android_rvh___set_task_cpu(void *unused, struct task_struct *p,
 
 static void android_rvh_set_task_cpu(void *unused, struct task_struct *p, unsigned int new_cpu)
 {
-	if (unlikely(walt_disabled))
+	if (unlikely(walt_disabled) || task_is_blocked(p))
 		return;
 
 	if (!cpumask_test_cpu(new_cpu, p->cpus_ptr))
