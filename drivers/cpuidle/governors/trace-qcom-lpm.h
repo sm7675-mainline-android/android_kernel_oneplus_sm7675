@@ -31,7 +31,7 @@ TRACE_EVENT(lpm_gov_select,
 		       __entry->reason = reason;
 	),
 
-	TP_printk("state:%d qos-us:%lld sleep-us:%llu reason:%#x",
+	TP_printk("state:%d qos-us:%lld sleep-us:%llu reason:%#llx",
 		  __entry->idx, __entry->qos, __entry->sleep, __entry->reason)
 );
 
