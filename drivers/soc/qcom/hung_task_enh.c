@@ -9,6 +9,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/syscore_ops.h>
+#include <linux/sysctl.h>
 
 #include <trace/hooks/hung_task.h>
 
@@ -101,8 +102,8 @@ void qcom_check_tasks_done(void *ignore, void *extra)
 }
 
 static DEFINE_MUTEX(readpid_mutex);
-static int read_pid_handler(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
+static int read_pid_handler(const struct ctl_table *table, int write,
+			    void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int ret;
 
@@ -113,8 +114,8 @@ static int read_pid_handler(struct ctl_table *table, int write,
 	return ret;
 }
 
-static int hung_task_handler(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
+static int hung_task_handler(const struct ctl_table *table, int write,
+			    void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int ret;
 	struct task_struct *task;
