@@ -148,6 +148,7 @@ struct adsp_data {
 	bool uses_elf64;
 	bool auto_boot;
 	bool recovery_enabled;
+	bool shutdown_on_start_timeout;
 	bool dma_phys_below_32b;
 	bool decrypt_shutdown;
 	bool hyp_assign_mem;
@@ -194,6 +195,7 @@ struct qcom_adsp {
 	unsigned int minidump_id;
 	bool both_dumps;
 	bool retry_shutdown;
+	bool shutdown_on_start_timeout;
 	struct icc_path *bus_client;
 	int crash_reason_smem;
 	bool dma_phys_below_32b;
@@ -987,12 +989,17 @@ static char *modem_firmware_select_by_rfid(unsigned int rfid)
 }
 //#endif /* OPLUS_FEATURE_SUBSYSTEM_FIRMWARE_SELECT */
 
+static int adsp_stop(struct rproc *rproc);
+
 static int adsp_start(struct rproc *rproc)
 {
 	struct qcom_adsp *adsp = (struct qcom_adsp *)rproc->priv;
 	int i, ret;
 	const struct firmware *fw = NULL;
 	const char *stage = "prepare";
+	bool shutdown_on_timeout = adsp->shutdown_on_start_timeout &&
+				   !rproc->recovery_disabled;
+	bool start_timed_out = false;
 
 	trace_rproc_qcom_event(dev_name(adsp->dev), "adsp_start", "enter");
 
@@ -1108,7 +1115,13 @@ static int adsp_start(struct rproc *rproc)
 
 	if (!timeout_disabled) {
 		stage = "start-wait";
-		ret = qcom_q6v5_wait_for_start(&adsp->q6v5, msecs_to_jiffies(5000));
+		if (shutdown_on_timeout) {
+			start_timed_out = !wait_for_completion_timeout(&adsp->q6v5.start_done,
+								       msecs_to_jiffies(5000));
+			ret = start_timed_out ? -ETIMEDOUT : 0;
+		} else {
+			ret = qcom_q6v5_wait_for_start(&adsp->q6v5, msecs_to_jiffies(5000));
+		}
 		if (rproc->recovery_disabled && ret)
 			panic("Panicking, remoteproc %s failed to bootup.\n", adsp->rproc->name);
 		else if (ret == -ETIMEDOUT)
@@ -1127,6 +1140,16 @@ free_metadata_dtb:
 	if (adsp->dtb_pas_id || adsp->dtb_fw_name) {
 		qcom_scm_pas_metadata_release(&adsp->dtb_mdata);
 		release_firmware(adsp->dtb_firmware);
+	}
+
+	if (start_timed_out) {
+		int stop_ret = adsp_stop(rproc);
+
+		if (stop_ret)
+			dev_err(adsp->dev, "shutdown after start timeout failed: %d\n",
+				stop_ret);
+		scm_pas_disable_bw();
+		goto exit;
 	}
 
 	scm_pas_disable_bw();
@@ -1987,6 +2010,7 @@ static int adsp_probe(struct platform_device *pdev)
 	adsp->qmp_name = desc->qmp_name;
 	adsp->dma_phys_below_32b = desc->dma_phys_below_32b;
 	adsp->both_dumps = desc->both_dumps;
+	adsp->shutdown_on_start_timeout = desc->shutdown_on_start_timeout;
 	adsp->subsys_recovery_disabled = rproc->recovery_disabled;
 	if (desc->recovery_enabled)
 		dev_info(adsp->dev, "subsystem recovery enabled for %s (%s)\n",
@@ -3082,6 +3106,8 @@ static const struct adsp_data cliffs_wpss_resource = {
 	.pas_id = 6,
 	.minidump_id = 4,
 	.uses_elf64 = true,
+	.recovery_enabled = true,
+	.shutdown_on_start_timeout = true,
 	.ssr_name = "wpss",
 	.sysmon_name = "wpss",
 	.qmp_name = "wpss",
