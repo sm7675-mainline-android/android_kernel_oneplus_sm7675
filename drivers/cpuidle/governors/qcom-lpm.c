@@ -11,6 +11,7 @@
 #include <linux/cpu_pm.h>
 #include <linux/ktime.h>
 #include <linux/module.h>
+#include <linux/preempt.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 #include <linux/pm_qos.h>
@@ -473,7 +474,7 @@ static void ipi_raise(void *ignore, const struct cpumask *mask, const char *unus
 	struct lpm_cpu *cpu_gov;
 	unsigned long flags;
 
-	if (suspend_in_progress)
+	if (in_nmi() || suspend_in_progress)
 		return;
 
 	for_each_cpu(cpu, mask) {
