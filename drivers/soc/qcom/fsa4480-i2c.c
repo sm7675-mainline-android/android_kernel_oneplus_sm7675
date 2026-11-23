@@ -639,31 +639,40 @@ static int typec_switch_to_fast_charger(struct fsa4480_priv *fsa_priv, unsigned 
 	}
 
 	mutex_lock(&fsa_priv->noti_lock);
-	regmap_read(fsa_priv->regmap, FSA4480_SWITCH_STATUS0, &reg_val);
+	ret = regmap_read(fsa_priv->regmap, FSA4480_SWITCH_STATUS0, &reg_val);
+	if (ret)
+		goto unlock;
 	dn_l_status = GET_BITS(reg_val, DEFAULT_SWITCH_STATUS0_DN_L_SWITCH_STATUS_L, width);
 	dp_r_status = GET_BITS(reg_val, DEFAULT_SWITCH_STATUS0_DP_R_SWITCH_STATUS_L, width);
 	if (dn_l_status == 0x02 || dp_r_status == 0x02) {
 		dev_info(dev,"%s, switching from headphone to charger is prohibited!\n", __func__);
-		mutex_unlock(&fsa_priv->noti_lock);
-		return -EPERM;
+		ret = -EPERM;
+		goto unlock;
 	}
 
 	dev_info(dev, "%s: to_fast_charger = %ld\n", __func__, to_fast_charger);
 	if (to_fast_charger) {
 		if (fsa_priv->vendor == DIO4483)
-			regmap_write(fsa_priv->regmap, FSA4480_SWITCH_CONTROL, 0x98);
+			ret = regmap_write(fsa_priv->regmap, FSA4480_SWITCH_CONTROL, 0x98);
 		else
-			regmap_write(fsa_priv->regmap, FSA4480_SWITCH_CONTROL, 0x80);
+			ret = regmap_write(fsa_priv->regmap, FSA4480_SWITCH_CONTROL, 0x80);
+	} else {
+		ret = regmap_write(fsa_priv->regmap, FSA4480_SWITCH_CONTROL, 0x18);
+	}
+	if (ret)
+		goto unlock;
 
-		regmap_write(fsa_priv->regmap, FSA4480_SWITCH_SETTINGS, 0x98);
+	ret = regmap_write(fsa_priv->regmap, FSA4480_SWITCH_SETTINGS, 0x98);
+	if (ret)
+		goto unlock;
+	if (to_fast_charger) {
 		usleep_range(10000, 10005);
 		dev_info(dev, "%s, charger plugin. set to switch mode", __func__);
 	} else {
-		regmap_write(fsa_priv->regmap, FSA4480_SWITCH_CONTROL, 0x18);
-		regmap_write(fsa_priv->regmap, FSA4480_SWITCH_SETTINGS, 0x98);
 		dev_info(dev, "%s, charger plugout. set to usb mode", __func__);
 	}
 
+unlock:
 	mutex_unlock(&fsa_priv->noti_lock);
 	return ret;
 }
@@ -709,7 +718,10 @@ static int typec_switch_get_status(struct fsa4480_priv *fsa_priv)
 	reg_l_shift = DEFAULT_SWITCH_STATUS0_DN_L_SWITCH_STATUS_L;
 	reg_r_shift = DEFAULT_SWITCH_STATUS0_DP_R_SWITCH_STATUS_L;
 
-	regmap_read(fsa_priv->regmap, reg_status, &reg_val);
+	if (regmap_read(fsa_priv->regmap, reg_status, &reg_val)) {
+		mutex_unlock(&fsa_priv->noti_lock);
+		return rc | TYPEC_AUDIO_SWITCH_STATE_I2C_ERR;
+	}
 	dev_info(dev, "%s, reg[0x%02x] = 0x%02x", __func__, reg_status, reg_val);
 	dn_l_status = GET_BITS(reg_val, reg_l_shift, width);
 	dp_r_status = GET_BITS(reg_val, reg_r_shift, width);
@@ -772,8 +784,7 @@ static int typec_switch_chg_event_changed(struct notifier_block *nb, unsigned lo
 	switch (event) {
 	case TYPEC_AUDIO_SWITCH_STATE_DPDM:
 	case TYPEC_AUDIO_SWITCH_STATE_FAST_CHG:
-		typec_switch_to_fast_charger(fsa_priv, event);
-		break;
+		return notifier_from_errno(typec_switch_to_fast_charger(fsa_priv, event));
 	case TYPEC_AUDIO_SWITCH_STATE_AUDIO:
 		return typec_switch_get_status(fsa_priv);
 	default:
