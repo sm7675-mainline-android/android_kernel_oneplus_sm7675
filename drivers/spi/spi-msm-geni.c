@@ -808,6 +808,13 @@ static struct msm_gpi_tre *setup_unlock_tre(struct spi_geni_master *mas)
 	return unlock_t;
 }
 
+static void spi_gsi_complete_error(struct spi_geni_master *mas)
+{
+	WRITE_ONCE(mas->qn_err, true);
+	complete_all(&mas->tx_cb);
+	complete_all(&mas->rx_cb);
+}
+
 static void spi_gsi_ch_cb(struct dma_chan *ch, struct msm_gpi_cb const *cb,
 				void *ptr)
 {
@@ -843,10 +850,7 @@ static void spi_gsi_ch_cb(struct dma_chan *ch, struct msm_gpi_cb const *cb,
 				cb->error_log.routine,
 				cb->error_log.type,
 				cb->error_log.error_code);
-		mas->qn_err = true;
-		complete_all(&mas->tx_cb);
-		complete_all(&mas->rx_cb);
-
+		spi_gsi_complete_error(mas);
 		break;
 	default:
 		SPI_LOG_ERR(mas->ipc, false, mas->dev,
@@ -878,6 +882,7 @@ static void spi_gsi_rx_callback(void *cb)
 		if (cb_param->status == MSM_GPI_TCE_UNEXP_ERR) {
 			SPI_LOG_ERR(mas->ipc, true, mas->dev,
 			"%s: Unexpected GSI CB error\n", __func__);
+			spi_gsi_complete_error(mas);
 			return;
 		}
 		if (cb_param->length == xfer->len) {
@@ -888,6 +893,7 @@ static void spi_gsi_rx_callback(void *cb)
 			SPI_LOG_ERR(mas->ipc, true, mas->dev,
 			"%s: Length mismatch. Expected %d Callback %d\n",
 			__func__, xfer->len, cb_param->length);
+			spi_gsi_complete_error(mas);
 		}
 	}
 }
@@ -910,6 +916,13 @@ static void spi_gsi_tx_callback(void *cb)
 	xfer = desc_cb->xfer;
 	mas = spi_master_get_devdata(spi);
 
+	if (cb_param->status == MSM_GPI_TCE_UNEXP_ERR) {
+		SPI_LOG_ERR(mas->ipc, true, mas->dev,
+			    "%s: Unexpected GSI CB error\n", __func__);
+		spi_gsi_complete_error(mas);
+		return;
+	}
+
 	/*
 	 * Case when lock/unlock support is required:
 	 * The callback comes on tx channel as lock/unlock
@@ -925,11 +938,6 @@ static void spi_gsi_tx_callback(void *cb)
 	}
 
 	if (xfer->tx_buf) {
-		if (cb_param->status == MSM_GPI_TCE_UNEXP_ERR) {
-			SPI_LOG_ERR(mas->ipc, true, mas->dev,
-			"%s: Unexpected GSI CB error\n", __func__);
-			return;
-		}
 		if (cb_param->length == xfer->len) {
 			SPI_LOG_DBG(mas->ipc, false, mas->dev,
 			"%s\n", __func__);
@@ -938,6 +946,7 @@ static void spi_gsi_tx_callback(void *cb)
 			SPI_LOG_ERR(mas->ipc, true, mas->dev,
 			"%s: Length mismatch. Expected %d Callback %d\n",
 			__func__, xfer->len, cb_param->length);
+			spi_gsi_complete_error(mas);
 		}
 	}
 }
@@ -959,6 +968,7 @@ static int spi_geni_lock_bus(struct spi_master *spi)
 	struct scatterlist *xfer_tx_sg = mas->gsi_lock_unlock->tx_sg;
 	unsigned long flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
 
+	WRITE_ONCE(mas->qn_err, false);
 	reinit_completion(&mas->tx_cb);
 
 	SPI_LOG_DBG(mas->ipc, false, mas->dev, "%s %d\n", __func__, ret);
@@ -1002,6 +1012,10 @@ static int spi_geni_lock_bus(struct spi_master *spi)
 		ret = -ETIMEDOUT;
 		goto err_spi_geni_lock_bus;
 	}
+	if (READ_ONCE(mas->qn_err)) {
+		ret = -EIO;
+		goto err_spi_geni_lock_bus;
+	}
 	return ret;
 err_spi_geni_lock_bus:
 	if (ret)
@@ -1024,6 +1038,7 @@ static void spi_geni_unlock_bus(struct spi_master *spi)
 		return;
 	}
 
+	WRITE_ONCE(mas->qn_err, false);
 	reinit_completion(&mas->tx_cb);
 
 	SPI_LOG_DBG(mas->ipc, false, mas->dev, "%s %d\n", __func__, ret);
@@ -1067,6 +1082,8 @@ static void spi_geni_unlock_bus(struct spi_master *spi)
 		ret = -ETIMEDOUT;
 		goto err_spi_geni_unlock_bus;
 	}
+	if (READ_ONCE(mas->qn_err))
+		ret = -EIO;
 
 err_spi_geni_unlock_bus:
 	if (ret)
@@ -2021,50 +2038,38 @@ dma_unprep:
  * Return: 0 on success, error code on failure.
  */
 static int spi_geni_check_gsi_transfer_completion(struct spi_geni_master *mas,
-						  unsigned long xfer_timeout)
+						  unsigned long timeout_jiffies)
 {
-	int i, ret = 0;
-	unsigned long timeout;
-	bool error = false;
+	int i;
 
 	for (i = 0; i < mas->num_tx_eot; i++) {
-		timeout = wait_for_completion_timeout(&mas->tx_cb, xfer_timeout);
-		if (!timeout) {
+		if (!wait_for_completion_timeout(&mas->tx_cb, timeout_jiffies)) {
 			SPI_LOG_ERR(mas->ipc, true, mas->dev,
-				    "Tx[%d] timeout%lu\n", i, timeout);
-			ret = -ETIMEDOUT;
-			error = true;
-			break;
+				    "Tx[%d] timed out\n", i);
+			return -ETIMEDOUT;
 		}
+		if (READ_ONCE(mas->qn_err))
+			return -EIO;
 	}
 
 	for (i = 0; i < mas->num_rx_eot; i++) {
-		timeout = wait_for_completion_timeout(&mas->rx_cb, xfer_timeout);
-		if (!timeout) {
+		if (!wait_for_completion_timeout(&mas->rx_cb, timeout_jiffies)) {
 			SPI_LOG_ERR(mas->ipc, true, mas->dev,
-				    "Rx[%d] timeout%lu\n", i, timeout);
-			ret = -ETIMEDOUT;
-			error = true;
-			break;
+				    "Rx[%d] timed out\n", i);
+			return -ETIMEDOUT;
 		}
+		if (READ_ONCE(mas->qn_err))
+			return -EIO;
 	}
 
-	if (error)
-		return ret;
-
-	if (mas->qn_err) {
-		ret = -EIO;
-		mas->qn_err = false;
-	}
-
-	return ret;
+	return 0;
 }
 
 static int spi_geni_transfer_one(struct spi_master *spi,
 				struct spi_device *slv,
 				struct spi_transfer *xfer)
 {
-	int ret = 0;
+	int ret = 0, recovery_ret;
 	unsigned int xfer_timeout;
 	struct spi_geni_master *mas = spi_master_get_devdata(spi);
 	unsigned long timeout, xfer_timeout_jiffies;
@@ -2161,7 +2166,7 @@ static int spi_geni_transfer_one(struct spi_master *spi,
 		mas->num_tx_eot = 0;
 		mas->num_rx_eot = 0;
 		mas->num_xfers = 0;
-		mas->qn_err = false;
+		WRITE_ONCE(mas->qn_err, false);
 		reinit_completion(&mas->tx_cb);
 		reinit_completion(&mas->rx_cb);
 
@@ -2178,7 +2183,7 @@ static int spi_geni_transfer_one(struct spi_master *spi,
 			goto err_gsi_geni_transfer_one;
 		}
 
-		ret = spi_geni_check_gsi_transfer_completion(mas, xfer_timeout);
+		ret = spi_geni_check_gsi_transfer_completion(mas, xfer_timeout_jiffies);
 		if (ret)
 			goto err_gsi_geni_transfer_one;
 	}
@@ -2191,7 +2196,10 @@ err_gsi_geni_transfer_one:
 	geni_spi_se_dump_dbg_regs(&mas->spi_rsc, mas->base, mas->ipc);
 	mutex_unlock(&mas->spi_ssr.ssr_lock);
 	mas->is_xfer_in_progress = false;
-	dmaengine_terminate_all(mas->tx);
+	recovery_ret = dmaengine_terminate_all(mas->tx);
+	if (recovery_ret)
+		SPI_LOG_ERR(mas->ipc, true, mas->dev,
+			    "GSI recovery failed: %d (transfer error: %d)\n", recovery_ret, ret);
 	if (mas->is_le_vm)
 		mas->le_gpi_reset_done = true;
 	return ret;
