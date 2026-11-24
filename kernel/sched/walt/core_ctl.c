@@ -455,7 +455,7 @@ static ssize_t show_nrrun_cpu_mask(const struct cluster_data *state, char *buf)
 {
 	int ret = 0;
 
-	ret = scnprintf(buf, PAGE_SIZE, "0x%x\n", (*(cpumask_bits(&state->nrrun_cpu_mask))));
+	ret = scnprintf(buf, PAGE_SIZE, "0x%lx\n", (*(cpumask_bits(&state->nrrun_cpu_mask))));
 
 	return ret;
 }
@@ -485,7 +485,8 @@ static ssize_t show_nrrun_cpu_misfit_mask(const struct cluster_data *state, char
 {
 	int ret = 0;
 
-	ret = scnprintf(buf, PAGE_SIZE, "0x%x\n", (*(cpumask_bits(&state->nrrun_cpu_misfit_mask))));
+	ret = scnprintf(buf, PAGE_SIZE, "0x%lx\n",
+			(*(cpumask_bits(&state->nrrun_cpu_misfit_mask))));
 
 	return ret;
 }
@@ -515,7 +516,7 @@ static ssize_t show_assist_cpu_mask(const struct cluster_data *state, char *buf)
 {
 	int ret = 0;
 
-	ret = scnprintf(buf, PAGE_SIZE, "0x%x\n", (*(cpumask_bits(&state->assist_cpu_mask))));
+	ret = scnprintf(buf, PAGE_SIZE, "0x%lx\n", (*(cpumask_bits(&state->assist_cpu_mask))));
 
 	return ret;
 }
@@ -545,7 +546,7 @@ static ssize_t show_assist_cpu_misfit_mask(const struct cluster_data *state, cha
 {
 	int ret = 0;
 
-	ret = scnprintf(buf, PAGE_SIZE, "0x%x\n",
+	ret = scnprintf(buf, PAGE_SIZE, "0x%lx\n",
 			(*(cpumask_bits(&state->assist_cpu_misfit_mask))));
 
 	return ret;
@@ -1306,8 +1307,13 @@ static bool core_ctl_check_masks_set(void)
 /* is the system in a single-big-thread case? */
 static inline bool is_sbt(bool prev_is_sbt, int prev_is_sbt_windows)
 {
-	struct cluster_data *cluster = &cluster_state[MAX_CLUSTERS - 1];
+	struct cluster_data *cluster;
 	bool ret = false;
+
+	if (!num_clusters)
+		return false;
+
+	cluster = &cluster_state[num_clusters - 1];
 
 	if (!sysctl_sched_sbt_enable)
 		goto out;
