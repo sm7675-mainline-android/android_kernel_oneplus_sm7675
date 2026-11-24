@@ -101,6 +101,7 @@ static bool assist_params_initialized;
 
 ATOMIC_NOTIFIER_HEAD(core_ctl_notifier);
 static unsigned int last_nr_big;
+static u32 last_wakeup_ctr_sum;
 
 static unsigned int get_active_cpu_count(const struct cluster_data *cluster);
 static unsigned int get_assist_active_cpu_count(const struct cluster_data *cluster);
@@ -995,6 +996,7 @@ static void update_running_avg(u64 window_start, u32 wakeup_ctr_sum)
 	spin_unlock_irqrestore(&state_lock, flags);
 
 	last_nr_big = big_avg;
+	last_wakeup_ctr_sum = wakeup_ctr_sum;
 	walt_rotation_checkpoint(big_avg);
 	fmax_uncap_checkpoint(big_avg, window_start, wakeup_ctr_sum);
 }
@@ -1304,6 +1306,59 @@ static bool core_ctl_check_masks_set(void)
 	return all_masks_set;
 }
 
+#define SBT_CPU_BUSY_PCT_THRESH	20
+#define SBT_CPU_BUSY_UTIL_THRESH	200
+#define SBT_CPU_CAPACITY_THRESH	700
+#define SBT_WAKEUP_CTR_THRESH	45
+
+static bool core_ctl_non_large_cpus_below_busy_pct(void)
+{
+	struct cluster_data *cluster;
+	struct cpu_data *c;
+	unsigned int index;
+	int cpu;
+
+	for (index = 0; index + 1 < num_clusters; index++) {
+		cluster = &cluster_state[index];
+		if (!cluster->inited)
+			return false;
+
+		for_each_cpu_and(cpu, &cluster->cpu_mask, cpu_online_mask) {
+			c = &per_cpu(cpu_state, cpu);
+			if (c->busy_pct > SBT_CPU_BUSY_PCT_THRESH)
+				return false;
+		}
+	}
+
+	return true;
+}
+
+static bool core_ctl_large_cpu_busy(const struct cluster_data *cluster)
+{
+	struct cpu_data *c;
+	unsigned long capacity, max_capacity, thermal_capacity;
+	int cpu;
+
+	for_each_cpu_and(cpu, &cluster->cpu_mask, cpu_online_mask) {
+		c = &per_cpu(cpu_state, cpu);
+		if (!is_active(c))
+			continue;
+
+		capacity = capacity_orig_of(cpu);
+		max_capacity = arch_scale_cpu_capacity(cpu);
+		thermal_capacity = max_capacity - min(max_capacity,
+					arch_scale_thermal_pressure(cpu));
+		if (min(capacity, thermal_capacity) * SCHED_CAPACITY_SCALE <
+		    max_capacity * SBT_CPU_CAPACITY_THRESH)
+			continue;
+
+		if (c->busy_pct * capacity > SBT_CPU_BUSY_UTIL_THRESH * 100)
+			return true;
+	}
+
+	return false;
+}
+
 /* is the system in a single-big-thread case? */
 static inline bool is_sbt(bool prev_is_sbt, int prev_is_sbt_windows)
 {
@@ -1318,10 +1373,22 @@ static inline bool is_sbt(bool prev_is_sbt, int prev_is_sbt_windows)
 	if (!sysctl_sched_sbt_enable)
 		goto out;
 
+	if (!cluster->inited)
+		goto out;
+
 	if (last_nr_big != 1)
 		goto out;
 
 	if (cluster->nr_big != 1)
+		goto out;
+
+	if (last_wakeup_ctr_sum > SBT_WAKEUP_CTR_THRESH)
+		goto out;
+
+	if (!core_ctl_non_large_cpus_below_busy_pct())
+		goto out;
+
+	if (!core_ctl_large_cpu_busy(cluster))
 		goto out;
 
 	ret = true;
