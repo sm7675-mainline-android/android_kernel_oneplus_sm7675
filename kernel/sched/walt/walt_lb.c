@@ -41,7 +41,7 @@ static bool walt_detach_task(struct task_struct *p, struct rq *src_rq,
 {
 	lockdep_assert_rq_held(src_rq);
 	if (task_on_cpu(src_rq, p) || task_current_donor(src_rq, p) ||
-	    task_is_blocked(p) || is_migration_disabled(p))
+	    task_is_blocked(p) || is_migration_disabled(p) || p->se.sched_delayed)
 		return false;
 
 	//TODO can we just replace with detach_task in fair.c??
@@ -284,7 +284,7 @@ static inline bool _walt_can_migrate_task(struct task_struct *p, int dst_cpu,
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
 
 	if (task_current_donor(task_rq(p), p) || task_is_blocked(p) ||
-	    is_migration_disabled(p))
+	    is_migration_disabled(p) || p->se.sched_delayed)
 		return false;
 
 	/* Don't detach task if it is under active migration */
@@ -329,14 +329,19 @@ static inline bool need_active_lb(struct task_struct *p, int dst_cpu,
 	if (cpu_rq(src_cpu)->active_balance)
 		return false;
 
-	if (!check_for_higher_capacity(dst_cpu, src_cpu))
+	if (!cpu_active(dst_cpu) || cpu_halted(dst_cpu))
 		return false;
 
-	if (!wts->misfit)
-		return false;
+	if (cpu_cluster(src_cpu) != cpu_cluster(dst_cpu) || !cpu_halted(src_cpu)) {
+		if (!check_for_higher_capacity(dst_cpu, src_cpu))
+			return false;
 
-	if (!is_min_possible_cluster_cpu(src_cpu) && !task_fits_max(p, dst_cpu))
-		return false;
+		if (!wts->misfit)
+			return false;
+
+		if (!is_min_possible_cluster_cpu(src_cpu) && !task_fits_max(p, dst_cpu))
+			return false;
+	}
 
 	if (task_reject_partialhalt_cpu(p, dst_cpu))
 		return false;
@@ -446,7 +451,7 @@ static int walt_lb_pull_tasks(int dst_cpu, int src_cpu, struct task_struct **pul
 	list_for_each_entry_reverse(p, &src_rq->cfs_tasks, se.group_node) {
 
 		if (task_on_cpu(src_rq, p)) {
-			if (cpumask_test_cpu(dst_cpu, p->cpus_ptr)
+			if (!p->se.sched_delayed && cpumask_test_cpu(dst_cpu, p->cpus_ptr)
 				&& need_active_lb(p, dst_cpu, src_cpu)) {
 				bool success;
 
@@ -562,7 +567,10 @@ static int walt_lb_find_busiest_similar_cap_cpu(int dst_cpu, const cpumask_t *sr
 		wrq = &per_cpu(walt_rq, i);
 		trace_walt_lb_cpu_util(i, wrq);
 
-		if (cpu_rq(i)->nr_running < 2 || !cpu_rq(i)->cfs.h_nr_running)
+		if (!cpu_active(i) || !cpu_rq(i)->cfs.h_nr_running)
+			continue;
+
+		if (!cpu_halted(i) && cpu_rq(i)->nr_running < 2)
 			continue;
 
 		util = walt_lb_cpu_util(i);
@@ -799,7 +807,8 @@ void walt_lb_tick(struct rq *rq)
 
 	raw_spin_lock(&rq->__lock);
 	rq_lock_diagnostic(rq, true);
-	if (rq->active_balance) {
+	if (rq->active_balance || READ_ONCE(p->__state) != TASK_RUNNING ||
+	    p->se.sched_delayed) {
 		rq_lock_diagnostic(rq, false);
 		raw_spin_unlock(&rq->__lock);
 		goto out_unlock;
